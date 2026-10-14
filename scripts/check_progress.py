@@ -42,8 +42,9 @@ def check(base=None):
     if base and set(base) != {'0'}:
         if not re.fullmatch(r'[0-9a-fA-F]{40,64}', base):
             raise ValueError('base 必须为 Git 提交 SHA')
-        result = subprocess.run(['git', 'diff', '--name-only', base, 'HEAD'], cwd=ROOT, capture_output=True, text=True, check=True)
-        changed = set(result.stdout.splitlines())
+        result = subprocess.run(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', '-z', base, 'HEAD'],
+                                cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True)
+        changed = set(result.stdout.split('\0')) - {''}
         code_changed = any(Path(path).suffix in CODE_SUFFIXES and not path.startswith('docs/') for path in changed)
         if code_changed and not {'TASKS.md', 'CHANGELOG.md'} <= changed:
             raise ValueError('运行代码/测试/配置变化必须同步提交 TASKS.md 与 CHANGELOG.md')
