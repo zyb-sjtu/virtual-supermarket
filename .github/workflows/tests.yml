@@ -1,0 +1,66 @@
+name: Backend and frontend checks
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.9', '3.12']
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m py_compile db.py server.py maintenance.py runtime.py storage.py postgres_schema.py postgres_maintenance.py
+      - run: node --check static/app.js
+      - name: Validate task progress and update discipline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        shell: bash
+        run: python scripts/check_progress.py ${BASE_SHA:+--base "$BASE_SHA"}
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: shop_app
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: shop_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SHOP_TEST_POSTGRES: '1'
+      SHOP_DB_BACKEND: postgresql
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: shop_app
+      PGDATABASE: shop_test
+      PGPASSWORD: ci-test-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      # The container bootstrap user is an admin. Test the business suite after
+      # downgrading its database role through a separate bootstrap admin.
+      - run: |
+          PGPASSWORD=ci-test-only psql -h 127.0.0.1 -U shop_app -d shop_test -c "CREATE ROLE bootstrap_admin LOGIN SUPERUSER PASSWORD 'bootstrap-ci-only';"
+          PGPASSWORD=bootstrap-ci-only psql -h 127.0.0.1 -U bootstrap_admin -d shop_test -c "ALTER ROLE shop_app NOSUPERUSER NOCREATEDB NOCREATEROLE;"
+      - run: python -m unittest tests.test_postgres -v

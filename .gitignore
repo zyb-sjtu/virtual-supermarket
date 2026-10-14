@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+data/
+.venv/
+.tmp/
+.local/
+.tools/
+*.dump
+# Credentials and databases must never be committed.
+.env
+.env.*
+!.env.example
+*.sqlite3
+*.sqlite3-*
+*.db
+*.pem
+*.key
+*.pfx
+*.p12
+# Intermediate report/video preparation files (final Word reports are tracked).
+docs/desktop-source.docx
+docs/video_package.bin
+docs/demo-thumb.jpg
+docs/embed_video.py
+docs/make_video_package.ps1
+docs/preview_embedded.py
+docs/render_embedded_preview.cjs

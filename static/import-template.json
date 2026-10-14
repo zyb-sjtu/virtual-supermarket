@@ -1,0 +1,6 @@
+{
+  "products": [
+    {"sku": "VEG-001", "name": "上海青", "category": "蔬菜", "unit": "袋", "zone": "蔬菜区 A01", "price_cents": 350, "stock": 20, "description": "当日鲜选"},
+    {"sku": "MILK-001", "name": "纯牛奶", "category": "乳品饮料", "unit": "盒", "zone": "冷藏区 B01", "price_cents": 680, "stock": 12, "description": "250 毫升"}
+  ]
+}

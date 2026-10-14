@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f8f4">
+  <title>鲜邻 · 超市管理</title>
+  <script>
+    // A double-click opens file://, which cannot reach our same-origin API.
+    if (window.location.protocol === "file:") {
+      window.location.replace("http://127.0.0.1:8000/" + window.location.hash);
+    }
+  </script>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="鲜邻首页"><span class="brand-icon">✳</span><span>鲜邻<span class="brand-light">Market</span></span></a>
+      <div class="side-label">工作台</div>
+      <nav class="nav-list" aria-label="主导航">
+        <a class="nav-item active" href="#overview"><span class="nav-icon">▦</span> 总览</a>
+        <a class="nav-item" href="#products"><span class="nav-icon">▤</span> 商品与库存</a>
+        <a class="nav-item" href="#orders"><span class="nav-icon">▧</span> 订单记录</a>
+        <a class="nav-item" href="#activity"><span class="nav-icon">◷</span> 最近记录</a>
+      </nav>
+      <div class="side-bottom">
+        <div class="side-card"><span class="side-card-icon">✦</span><strong>简单管理，随时买卖</strong><span>每一次操作都会持久保存到数据库。</span></div>
+        <div class="side-version"><span class="live-dot"></span> 服务运行 <span>v1.4</span></div>
+      </div>
+    </aside>
+
+    <main class="main-content" id="overview">
+      <header class="topbar">
+        <div class="breadcrumb">工作台 <span>/</span> <strong>总览</strong></div>
+        <div class="topbar-right"><span id="connection" class="connection"><span class="live-dot"></span> 正在连接</span><div class="avatar" aria-label="访客">访</div></div>
+      </header>
+
+      <div class="content-wrap">
+        <section class="welcome">
+          <div><div class="eyebrow">LOCAL MARKET DASHBOARD</div><h1>新鲜好物，<br><span>一目了然。</span></h1><p>查看库存、补充商品、直接购买。每一步都清清楚楚。</p><a href="#products" class="welcome-link">查看商品 <span>↗</span></a></div>
+          <div class="hero-art" aria-hidden="true"><div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div><div class="hero-apple">🍎</div><div class="hero-banana">🍌</div><div class="hero-sparkle s1">✦</div><div class="hero-sparkle s2">✳</div><div class="hero-sticker">今日鲜选 <span>FRESH PICKS</span></div></div>
+        </section>
+
+        <section class="stats" aria-label="经营概览">
+          <div class="stat-card"><div class="stat-icon green">▤</div><div><span>在售商品</span><strong id="stat-products">—</strong><small>全部已上架商品</small></div></div>
+          <div class="stat-card"><div class="stat-icon orange">▦</div><div><span>当前总库存</span><strong id="stat-stock">—</strong><small>各商品库存数量合计</small></div></div>
+          <div class="stat-card"><div class="stat-icon purple">↗</div><div><span>累计净销售额</span><strong id="stat-sales">—</strong><small>已扣除取消订单</small></div></div>
+        </section>
+
+        <div class="section-heading" id="products"><div><span class="section-kicker">FRESH SELECTION</span><h2>商品与库存</h2><p>管理商品资料、库存与货架分区</p></div><div class="catalog-actions"><button class="refresh-btn" id="refresh" type="button" aria-label="刷新数据">↻ <span>刷新数据</span></button><button class="refresh-btn" id="open-import" type="button">批量导入</button><button class="listing-button" id="open-listing" type="button">＋ 上架商品</button></div></div>
+        <div class="catalog-filters" role="group" aria-label="商品上架状态"><button id="show-active" type="button" aria-pressed="true">在售商品 <span id="active-count">—</span></button><button id="show-inactive" type="button" aria-pressed="false">已下架 <span id="inactive-count">—</span></button></div>
+        <form id="catalog-search" class="catalog-search"><input id="search-products" type="search" maxlength="100" placeholder="搜索商品名称或 SKU" aria-label="搜索商品名称或 SKU"><select id="search-category" aria-label="按分类筛选"><option value="">全部分类</option><option>水果</option><option>蔬菜</option><option>肉禽水产</option><option>乳品饮料</option><option>粮油食品</option><option>日用百货</option><option>其他</option></select><button type="submit">搜索</button></form>
+        <section class="product-grid" id="product-grid" aria-live="polite"><div class="loading-card">正在加载商品…</div></section>
+        <div class="pagination-bar"><p id="page-summary" aria-live="polite">正在读取商品列表</p><nav class="pagination" id="pagination" aria-label="商品分页"></nav></div>
+
+        <section class="activity-section" id="orders"><div class="section-heading"><div><span class="section-kicker">ORDER MANAGEMENT</span><h2>订单记录</h2><p>购买生成订单，取消后恢复库存</p></div><span id="orders-count" class="records-badge">0 个订单</span></div><div id="orders-list" class="orders-list"><div class="empty-state">正在读取订单…</div></div><div class="orders-pagination"><button id="orders-prev" type="button" class="refresh-btn">上一页</button><span id="orders-page">第 1 页</span><button id="orders-next" type="button" class="refresh-btn">下一页</button></div></section>
+
+        <section class="activity-section" id="activity"><div class="section-heading activity-heading"><div><span class="section-kicker">LATEST ACTIVITY</span><h2>最近记录</h2><p>展示最近 12 次商品和库存变动</p></div><span class="records-badge" id="records-count">0 条记录</span></div><div class="activity-card"><div class="activity-header"><span>操作 / 商品</span><span>数量</span><span>时间</span></div><div id="activity-list" class="activity-list"><div class="empty-state">暂无记录，先试着补货或购买吧。</div></div></div></section>
+        <section class="export-panel" aria-label="数据导出"><strong>数据导出</strong><a href="/api/export?kind=products" download>商品 CSV</a><a href="/api/export?kind=orders" download>订单 CSV</a><a href="/api/export?kind=inventory" download>库存台账 CSV</a><a href="/api/export?kind=audit" download>操作审计 CSV</a></section>
+        <footer>鲜邻 Market · 超市管理系统 <span>库存更新由数据库事务保障</span></footer>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="action-dialog" class="action-dialog" aria-labelledby="dialog-title">
+    <form id="action-form" class="dialog-inner">
+      <button class="dialog-close" id="dialog-close" type="button" aria-label="关闭">×</button>
+      <div id="dialog-emoji" class="dialog-emoji"></div>
+      <div class="dialog-kicker" id="dialog-kicker">购买商品</div>
+      <h2 id="dialog-title">苹果</h2>
+      <p id="dialog-description">选择数量后确认操作</p>
+      <label class="quantity-label" for="quantity">数量 <span id="quantity-hint"></span></label>
+      <div class="quantity-control"><button type="button" id="decrease" aria-label="减少数量">−</button><input id="quantity" name="quantity" type="number" min="1" max="9999" value="1" required inputmode="numeric"><button type="button" id="increase" aria-label="增加数量">+</button></div>
+      <div id="dialog-total" class="dialog-total"><span>预计金额</span><strong>¥0.00</strong></div>
+      <p id="form-error" class="form-error" role="alert"></p>
+      <button type="submit" id="submit-action" class="submit-action">确认操作</button>
+    </form>
+  </dialog>
+  <dialog id="listing-dialog" class="action-dialog listing-dialog" aria-labelledby="listing-title">
+    <form id="listing-form" class="dialog-inner">
+      <fieldset id="listing-fields">
+        <button class="dialog-close" id="listing-close" type="button" aria-label="关闭上架表单">×</button>
+        <div class="dialog-kicker">NEW PRODUCT · 新品上架</div>
+        <h2 id="listing-title">上架你的商品</h2>
+        <p class="listing-intro">填写商品信息，确认后即可购买和补货。</p>
+        <div class="listing-form-grid">
+          <label for="listing-sku">SKU 商品编码 <span>创建后固定</span><input id="listing-sku" name="sku" maxlength="32" pattern="[A-Za-z0-9_-]{1,32}" placeholder="留空自动生成"></label>
+          <label for="listing-zone">货架分区<input id="listing-zone" name="zone" maxlength="40" value="未分区" required placeholder="例如：蔬菜区 A01"></label>
+          <label class="listing-wide" for="listing-name">商品名称 <span>必填</span><input id="listing-name" name="name" maxlength="40" required placeholder="例如：上海青"></label>
+          <label for="listing-category">商品分类<select id="listing-category" name="category"><option>水果</option><option>蔬菜</option><option>肉禽水产</option><option>乳品饮料</option><option>粮油食品</option><option>日用百货</option><option>其他</option></select></label>
+          <label for="listing-unit">计量单位<input id="listing-unit" name="unit" value="件" maxlength="8" required placeholder="件、袋、斤"></label>
+          <label for="listing-price">单价（元）<input id="listing-price" name="price" type="text" inputmode="decimal" required pattern="[0-9]+(\.[0-9]{1,2})?" placeholder="最多两位小数"></label>
+          <label for="listing-stock">初始库存<input id="listing-stock" name="stock" type="number" min="0" max="9999" step="1" value="0" required inputmode="numeric"></label>
+          <label class="listing-wide" for="listing-description">商品简介 <span>选填</span><textarea id="listing-description" name="description" maxlength="100" rows="2" placeholder="描述规格、产地或商品特点"></textarea></label>
+          <label class="listing-wide" for="listing-image">商品图片 <span>选填 · JPG / PNG / WebP，1 MB 以内</span><input id="listing-image" type="file" accept="image/jpeg,image/png,image/webp"><img id="listing-preview" class="listing-preview" alt="待上架商品图片预览" hidden></label>
+          <label class="listing-wide remove-image" id="remove-image-label" hidden><input id="remove-image" type="checkbox">移除现有图片，使用缺省图</label>
+        </div>
+        <p id="listing-error" class="form-error" role="alert"></p>
+        <button class="submit-action" id="listing-submit" type="submit">确认上架</button>
+      </fieldset>
+    </form>
+  </dialog>
+  <dialog id="operation-dialog" class="action-dialog" aria-labelledby="operation-title"><form id="operation-form" class="dialog-inner"><button id="operation-close" class="dialog-close" type="button" aria-label="关闭操作">×</button><div class="dialog-kicker">INVENTORY & ORDERS</div><h2 id="operation-title">库存调整</h2><p id="operation-description"></p><div class="listing-form-grid"><label class="listing-wide" id="delta-label" for="operation-delta">调整数量 <span>增加填正数，减少填负数</span><input id="operation-delta" type="number" step="1" min="-9999" max="9999" value="-1"></label><label class="listing-wide" for="operation-reason">操作原因<textarea id="operation-reason" maxlength="200" rows="3" required placeholder="例如：盘点差异、商品破损、顾客取消"></textarea></label></div><p id="operation-error" class="form-error" role="alert"></p><button id="operation-submit" class="submit-action" type="submit">确认操作</button></form></dialog>
+  <dialog id="ledger-dialog" class="action-dialog listing-dialog" aria-labelledby="ledger-title"><div class="dialog-inner"><button id="ledger-close" class="dialog-close" type="button" aria-label="关闭库存台账">×</button><div class="dialog-kicker">INVENTORY HISTORY</div><h2 id="ledger-title">库存台账</h2><p id="ledger-product"></p><div id="ledger-list" class="ledger-list"></div><div class="orders-pagination"><button id="ledger-prev" type="button" class="refresh-btn">上一页</button><span id="ledger-page"></span><button id="ledger-next" type="button" class="refresh-btn">下一页</button></div></div></dialog>
+  <dialog id="import-dialog" class="action-dialog listing-dialog" aria-labelledby="import-title"><form id="import-form" class="dialog-inner"><fieldset id="import-fields"><button id="import-close" class="dialog-close" type="button" aria-label="关闭批量导入">×</button><div class="dialog-kicker">BATCH IMPORT</div><h2 id="import-title">批量导入商品</h2><p class="listing-intro">每次最多 100 个商品，须包含唯一 SKU。整批成功后才会写入；价格以分填写。</p><a class="template-link" href="/import-template.json" download>下载 JSON 导入示例</a><div class="listing-form-grid"><label class="listing-wide" for="import-file">商品 JSON 文件<input id="import-file" type="file" accept=".json,application/json" required></label></div><p id="import-error" class="form-error" role="alert"></p><button class="submit-action" type="submit">确认导入</button></fieldset></form></dialog>
+  <dialog id="status-dialog" class="action-dialog" aria-labelledby="status-title">
+    <form id="status-form" class="dialog-inner">
+      <button class="dialog-close" id="status-close" type="button" aria-label="关闭上下架确认">×</button>
+      <div class="dialog-kicker">PRODUCT MANAGEMENT · 商品管理</div>
+      <h2 id="status-title">下架商品</h2>
+      <p id="status-product" class="status-product"></p>
+      <p id="status-description"></p>
+      <p id="status-error" class="form-error" role="alert"></p>
+      <button id="status-submit" class="submit-action" type="submit">确认下架</button>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

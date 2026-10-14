@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-14",
+  "primary": {
+    "status": "ok",
+    "database": "ok",
+    "version": "1.4",
+    "engine": "postgresql",
+    "host": "127.0.0.1",
+    "port": 5433,
+    "name": "shop"
+  },
+  "replica": {
+    "status": "ok",
+    "database": "ok",
+    "version": "1.4",
+    "engine": "postgresql",
+    "host": "127.0.0.1",
+    "port": 5434,
+    "name": "shop"
+  },
+  "backup_restore_all_table_fields_match": true,
+  "sqlite_product_fields_match": true,
+  "replica_transaction_and_idempotency": true,
+  "historic_price_snapshot": true,
+  "image_bytes_preserved": true,
+  "primary_unchanged_after_replica_writes": true,
+  "original_counts": {
+    "products": 3,
+    "orders": 3,
+    "movements": 7,
+    "order_items": 3,
+    "inventory_entries": 10,
+    "audit_events": 0,
+    "api_requests": 0,
+    "product_creations": 1,
+    "product_status_changes": 0
+  },
+  "unit_tests": {
+    "sqlite": 28,
+    "postgresql": 15
+  },
+  "database_stopped_http_stays_alive": true,
+  "database_stopped_data_and_writes_return_503": true,
+  "primary_unaffected_by_replica_outage": true,
+  "restart_preserves_all_pre_outage_fields": true,
+  "offline_write_not_committed_or_fallen_back": true
+}
