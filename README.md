@@ -4,6 +4,8 @@
 
 **项目进度：[TASKS.md](TASKS.md)　版本变化：[CHANGELOG.md](CHANGELOG.md)　后续维护规范：[AGENTS.md](AGENTS.md)。** 每次版本更新必须同步更新任务状态、验收证据与变更记录。
 
+仓库：[zyb-sjtu/virtual-supermarket](https://github.com/zyb-sjtu/virtual-supermarket)（私有，需登录有权限的 GitHub 账号）。源代码、最终报告和验证记录已入库，本机密码、数据库与运行环境按忽略规则排除；新克隆请按下文安装环境。
+
 ## 快速运行（PostgreSQL）
 
 当前默认使用 **PostgreSQL 17 独立服务**，Python 3.9+，驱动固定为 Psycopg 3.2.13。Windows 项目内运行：
