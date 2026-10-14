@@ -182,4 +182,4 @@ PostgreSQL 测试强制连接专用 `shop_test`，每个用例会清空它；不
 | `.local/` | 仅本机凭据，忽略提交，不在报告中展示 |
 | `.tools/`、`.venv/`、`data/` | 运行时与数据，忽略提交 |
 
-CI 已增加独立 PostgreSQL 17 服务的测试任务；本机验证已完成，远端 CI 尚未实际运行。
+CI 已增加独立 PostgreSQL 17 服务的测试任务；本机与远程克隆验证完成，Windows/Linux 回归矩阵和 PostgreSQL 共五项 [远端 CI](https://github.com/zyb-sjtu/virtual-supermarket/actions/runs/38540057987) 已实际运行并全部通过。进度与后续版本维护见根目录 TASKS.md。

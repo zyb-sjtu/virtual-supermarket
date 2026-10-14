@@ -6,6 +6,8 @@
 
 仓库：[zyb-sjtu/virtual-supermarket](https://github.com/zyb-sjtu/virtual-supermarket)（私有，需登录有权限的 GitHub 账号）。源代码、最终报告和验证记录已入库，本机密码、数据库与运行环境按忽略规则排除；新克隆请按下文安装环境。
 
+开发、提交、版本发布与自动进度检查见 [Git 仓库与维护说明](docs/Git仓库与维护说明.md)。
+
 ## 快速运行（PostgreSQL）
 
 当前默认使用 **PostgreSQL 17 独立服务**，Python 3.9+，驱动固定为 Psycopg 3.2.13。Windows 项目内运行：
@@ -170,7 +172,7 @@ $env:SHOP_TEST_POSTGRES = '1'
 node --check static/app.js
 ```
 
-本机已通过 28 项 SQLite 回归测试与 15 项 PostgreSQL 测试，覆盖并发购买/取消、幂等、整单回滚、100 商品导入、快照、维护与校验。PostgreSQL 测试强制使用专用 `shop_test`，每个用例会清空测试库；正式 `shop` 不受影响。未设置测试开关时 PostgreSQL 用例跳过。已提供 Windows/Linux 回归 CI 与 PostgreSQL 17 CI 配置，远端 CI 尚未运行。
+本机已通过 28 项 SQLite 回归测试与 15 项 PostgreSQL 测试，覆盖并发购买/取消、幂等、整单回滚、100 商品导入、快照、维护与校验。PostgreSQL 测试强制使用专用 `shop_test`，每个用例会清空测试库；正式 `shop` 不受影响。未设置测试开关时 PostgreSQL 用例跳过。远程克隆后 43 项测试通过；Windows/Linux × Python 3.9/3.12 的回归矩阵与 PostgreSQL 17 测试共五项 [远端 CI](https://github.com/zyb-sjtu/virtual-supermarket/actions/runs/38540057987) 全部通过。
 
 网页上架、改价、图片上传/移除、购买、取消、调整、台账、筛选、导入和 CSV 下载已在独立 PostgreSQL 测试库验证，桌面与移动端布局检查通过。Node/Playwright 仅为验证依赖。
 
