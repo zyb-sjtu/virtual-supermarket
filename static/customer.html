@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f8f4">
+  <title>鲜邻 · 顾客选购</title>
+  <link rel="stylesheet" href="/customer.css">
+  <script src="/customer.js" defer></script>
+</head>
+<body>
+  <div class="customer-shell">
+    <header class="customer-topbar">
+      <a class="brand" href="/customer" aria-label="鲜邻顾客首页"><span class="brand-mark">✳</span><span>鲜邻<span class="brand-light">Market</span></span></a>
+      <nav class="topnav" aria-label="顾客导航"><a href="#catalog">选购商品</a><a href="#orders">我的订单</a></nav>
+      <div class="topbar-right">
+        <span class="role-chip">顾客</span>
+        <button id="logout" class="logout-button" type="button">退出登录</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="customer-hero">
+        <div>
+          <p class="eyebrow">CUSTOMER MARKET</p>
+          <h1>挑点新鲜的，<br><span>带回家。</span></h1>
+          <p class="hero-copy">浏览在售商品，选择数量后下单。当前是演示顾客身份，订单只在当前会话内可见。</p>
+          <a class="hero-link" href="#catalog">开始选购 <span>↗</span></a>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <span class="hero-emoji">🥬</span>
+          <span class="hero-emoji small">🍎</span>
+          <span class="hero-emoji tiny">🐟</span>
+          <div class="hero-sticker">无需账号密码<br><strong>演示身份</strong></div>
+        </div>
+      </section>
+
+      <section id="catalog" class="customer-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">FRESH SELECTION</p>
+            <h2>在售商品</h2>
+            <p id="catalog-summary">正在读取商品…</p>
+          </div>
+          <form id="search-form" class="search-form">
+            <input id="search" type="search" maxlength="100" placeholder="搜索商品名称或 SKU" aria-label="搜索商品">
+            <select id="category" aria-label="按分类筛选"><option value="">全部分类</option></select>
+            <button type="submit">搜索</button>
+          </form>
+        </div>
+        <div id="product-grid" class="product-grid" aria-live="polite"><div class="empty-state">正在加载商品…</div></div>
+        <div class="pagination-bar">
+          <p id="page-summary"></p>
+          <nav id="pagination" class="pagination" aria-label="商品分页"></nav>
+        </div>
+      </section>
+
+      <section id="orders" class="customer-section orders-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">MY ORDERS</p>
+            <h2>我的订单</h2>
+            <p>只显示当前顾客会话创建的订单；退出后重新进入将无法查看旧会话订单。</p>
+          </div>
+          <span id="orders-count" class="records-badge">0 个订单</span>
+        </div>
+        <div id="orders-list" class="orders-list"><div class="empty-state">正在读取订单…</div></div>
+        <div class="orders-pagination">
+          <button id="orders-prev" class="ghost-button" type="button">上一页</button>
+          <span id="orders-page">第 1 页</span>
+          <button id="orders-next" class="ghost-button" type="button">下一页</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="customer-footer">鲜邻 Market · 顾客选购演示 <span>订单与库存由数据库事务保障</span></footer>
+  </div>
+
+  <dialog id="purchase-dialog" class="dialog" aria-labelledby="purchase-title">
+    <form id="purchase-form" class="dialog-inner">
+      <button id="purchase-close" class="dialog-close" type="button" aria-label="关闭">×</button>
+      <div id="purchase-visual" class="dialog-visual"></div>
+      <p class="eyebrow">PURCHASE</p>
+      <h2 id="purchase-title">购买商品</h2>
+      <p id="purchase-description" class="dialog-copy"></p>
+      <label class="field-label" for="quantity">数量 <span id="quantity-hint"></span></label>
+      <div class="quantity-control">
+        <button id="decrease" type="button" aria-label="减少数量">−</button>
+        <input id="quantity" type="number" min="1" max="9999" value="1" required inputmode="numeric">
+        <button id="increase" type="button" aria-label="增加数量">+</button>
+      </div>
+      <div class="dialog-total"><span>预计金额</span><strong id="purchase-total">¥0.00</strong></div>
+      <p id="purchase-error" class="form-error" role="alert"></p>
+      <button id="purchase-submit" class="primary-button" type="submit">确认购买</button>
+    </form>
+  </dialog>
+
+  <dialog id="cancel-dialog" class="dialog" aria-labelledby="cancel-title">
+    <form id="cancel-form" class="dialog-inner">
+      <button id="cancel-close" class="dialog-close" type="button" aria-label="关闭">×</button>
+      <p class="eyebrow">CANCEL ORDER</p>
+      <h2 id="cancel-title">取消订单</h2>
+      <p id="cancel-description" class="dialog-copy"></p>
+      <label class="field-label" for="cancel-reason">取消原因</label>
+      <textarea id="cancel-reason" maxlength="200" rows="3" required placeholder="例如：临时改变计划"></textarea>
+      <p id="cancel-error" class="form-error" role="alert"></p>
+      <button id="cancel-submit" class="primary-button danger" type="submit">确认取消</button>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

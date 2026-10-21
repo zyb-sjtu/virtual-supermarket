@@ -1,4 +1,4 @@
-$ShopRoot = Split-Path -Parent $PSScriptRoot
+﻿$ShopRoot = Split-Path -Parent $PSScriptRoot
 $ShopPython = Join-Path $ShopRoot '.venv\Scripts\python.exe'
 $ShopPgBin = Join-Path $ShopRoot '.tools\postgresql\pgsql\bin'
 if (-not (Test-Path -LiteralPath $ShopPython)) { throw '请先创建 .venv 并安装 requirements.txt' }

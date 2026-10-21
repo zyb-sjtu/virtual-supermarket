@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from db import InventoryError, initialize, move_stock, snapshot, create_product, set_product_status
 from server import ShopHandler
+from tests.session_helpers import login
 
 
 class DatabaseTests(unittest.TestCase):
@@ -194,6 +195,8 @@ class HttpTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_port}"
+        self.merchant, _ = login(self.base, "merchant")
+        self.customer, _ = login(self.base, "customer")
 
     def tearDown(self):
         self.server.shutdown()
@@ -203,19 +206,19 @@ class HttpTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_http_purchase_and_static_page(self):
-        with urlopen(self.base + "/") as response:
+        with self.customer.open(self.base + "/customer") as response:
             self.assertIn("鲜邻", response.read().decode("utf-8"))
         body = json.dumps({"action": "purchase", "product_id": "apple", "quantity": 2,
                            "request_id": "http-buy"}).encode("utf-8")
         request = Request(self.base + "/api/movements", body,
                           headers={"Content-Type": "application/json"}, method="POST")
-        with urlopen(request) as response:
+        with self.customer.open(request) as response:
             self.assertEqual(response.status, 201)
             self.assertEqual(json.load(response)["stock_after"], 22)
-        with urlopen(request) as response:
+        with self.customer.open(request) as response:
             self.assertEqual(response.status, 200)
             self.assertTrue(json.load(response)["duplicate"])
-        with urlopen(self.base + "/api/state") as response:
+        with self.customer.open(self.base + "/api/state") as response:
             self.assertEqual(json.load(response)["products"][0]["stock"], 22)
 
     def test_http_invalid_input(self):
@@ -224,7 +227,7 @@ class HttpTests(unittest.TestCase):
         request = Request(self.base + "/api/movements", body,
                           headers={"Content-Type": "application/json"}, method="POST")
         with self.assertRaises(HTTPError) as raised:
-            urlopen(request)
+            self.customer.open(request)
         self.assertEqual(raised.exception.code, 409)
 
     def test_http_listing_image_pagination_and_replay(self):
@@ -233,19 +236,19 @@ class HttpTests(unittest.TestCase):
                    "unit": "盒", "request_id": "image-product", "image_data": "data:image/png;base64," + base64.b64encode(png).decode()}
         request = Request(self.base + "/api/products", json.dumps(payload).encode(),
                           headers={"Content-Type": "application/json"}, method="POST")
-        with urlopen(request) as response:
+        with self.merchant.open(request) as response:
             self.assertEqual(response.status, 201)
             product = json.load(response)["product"]
-        with urlopen(request) as response:
+        with self.merchant.open(request) as response:
             self.assertEqual(response.status, 200)
-        with urlopen(self.base + product["image_url"]) as response:
+        with self.merchant.open(self.base + product["image_url"]) as response:
             self.assertEqual(response.headers["Content-Type"], "image/png")
             self.assertEqual(response.read(), png)
         for page in ("0", "abc"):
             with self.assertRaises(HTTPError) as raised:
-                urlopen(self.base + "/api/state?page=" + page)
+                self.merchant.open(self.base + "/api/state?page=" + page)
             self.assertEqual(raised.exception.code, 400)
-        with urlopen(self.base + "/api/state?page=99") as response:
+        with self.merchant.open(self.base + "/api/state?page=99") as response:
             state = json.load(response)
             self.assertEqual(state["page"], 1)
             self.assertEqual(state["product_count"], 3)
@@ -253,22 +256,22 @@ class HttpTests(unittest.TestCase):
     def test_http_product_status_and_default_image(self):
         request = Request(self.base + "/api/product-status", json.dumps({"product_id": "apple", "active": False,
             "request_id": "http-down"}).encode(), headers={"Content-Type": "application/json"}, method="POST")
-        with urlopen(request) as response:
+        with self.merchant.open(request) as response:
             self.assertEqual(response.status, 201)
-        with urlopen(request) as response:
+        with self.merchant.open(request) as response:
             self.assertEqual(response.status, 200)
             self.assertTrue(json.load(response)["duplicate"])
-        with urlopen(self.base + "/api/state?status=inactive") as response:
+        with self.merchant.open(self.base + "/api/state?status=inactive") as response:
             state = json.load(response)
             self.assertEqual(state["products"][0]["id"], "apple")
             self.assertEqual(state["inactive_count"], 1)
-        with urlopen(self.base + "/product-placeholder.svg") as response:
+        with self.merchant.open(self.base + "/product-placeholder.svg") as response:
             self.assertEqual(response.headers["Content-Type"], "image/svg+xml")
             self.assertIn(b"<svg", response.read())
         bad = Request(self.base + "/api/product-status", json.dumps({"product_id": "apple", "active": "false",
             "request_id": "http-bad-down"}).encode(), headers={"Content-Type": "application/json"}, method="POST")
         with self.assertRaises(HTTPError) as raised:
-            urlopen(bad)
+            self.merchant.open(bad)
         self.assertEqual(raised.exception.code, 400)
 
 

@@ -1,3 +1,13 @@
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const response = await nativeFetch(...args);
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("登录已过期");
+  }
+  return response;
+};
+
 const categoryMeta = {
   水果: { english: "FRUIT", tone: "apple" },
   蔬菜: { english: "VEGETABLES", tone: "vegetable" },
@@ -49,7 +59,7 @@ function createProductCard(product) {
     <div class="product-visual ${category.tone}"><span class="visual-label">${category.english}</span><span class="stock-pill"></span><span class="placeholder-caption" hidden>暂无商品图片</span></div>
     <div class="product-body"><div class="product-title-row"><div><h3></h3><p class="product-category"></p></div><div class="price"></div></div><p class="product-description"></p>
     <div class="stock-line"><span>实时库存</span><strong></strong></div><div class="stock-track"><div class="stock-fill"></div></div>
-    <div class="card-actions"><button type="button" class="buy-button">立即购买</button><button type="button" class="restock-button">补充库存</button></div><div class="card-manage"><button type="button" class="edit-button">编辑商品</button><button type="button" class="adjust-button">调整库存</button><button type="button" class="ledger-button">库存台账</button></div><button type="button" class="delist-button">下架商品</button></div>`;
+    <div class="card-actions"><button type="button" class="restock-button">补充库存</button><button type="button" class="relist-button" hidden>重新上架</button></div><div class="card-manage"><button type="button" class="edit-button">编辑商品</button><button type="button" class="adjust-button">调整库存</button><button type="button" class="ledger-button">库存台账</button></div><button type="button" class="delist-button">下架商品</button></div>`;
   card.querySelector("h3").textContent = product.name;
   card.querySelector(".product-category").textContent = `${product.category} · ${product.zone}`;
   card.querySelector(".product-description").textContent = product.description || product.sku;
@@ -72,10 +82,9 @@ function createProductCard(product) {
   fill.style.width = `${Math.min(100, product.stock / 30 * 100)}%`;
   fill.classList.toggle("low", product.stock > 0 && product.stock <= 5);
   fill.classList.toggle("out", product.stock === 0);
-  const buy = card.querySelector(".buy-button");
-  buy.textContent = product.active ? "立即购买" : "重新上架";
-  buy.disabled = !!product.active && product.stock === 0;
-  buy.addEventListener("click", () => product.active ? openAction("purchase", product) : openStatus(product, true));
+  const relist = card.querySelector(".relist-button");
+  relist.hidden = !!product.active;
+  relist.addEventListener("click", () => openStatus(product, true));
   const delist = card.querySelector(".delist-button");
   delist.hidden = !product.active;
   delist.addEventListener("click", () => openStatus(product, false));
@@ -619,5 +628,8 @@ importForm.addEventListener("submit", async event => {
 });
 
 document.getElementById("refresh").addEventListener("click", () => refresh(true));
+document.getElementById("logout").addEventListener("click", async () => {
+  try { await fetch("/api/logout", { method: "POST" }); } finally { window.location.href = "/login"; }
+});
 refresh(true);
 setInterval(() => refresh(), 5000);

@@ -317,8 +317,17 @@ def product_image(product_id: str, db_path: Path | None = None):
         return row["image"], row["image_type"]
 
 
+def product_by_id(product_id: str, db_path: Path | None = None) -> dict:
+    with closing(connect(db_path)) as connection:
+        begin_read(connection)
+        row = connection.execute(f"SELECT {PRODUCT_COLUMNS} FROM products WHERE id = ?", (product_id,)).fetchone()
+        if row is None:
+            raise InventoryError("商品不存在", 404)
+        return _product_result(row)
+
+
 def move_stock(action: str, product_id: str, quantity: int, request_id: str,
-               db_path: Path | None = None) -> dict:
+               db_path: Path | None = None, buyer_key: str | None = None) -> dict:
     if action not in ("purchase", "restock"):
         raise InventoryError("操作类型无效")
     if not isinstance(product_id, str) or not product_id:
@@ -350,7 +359,7 @@ def move_stock(action: str, product_id: str, quantity: int, request_id: str,
 
             if action == "purchase":
                 order, duplicate = _create_order(connection, [{"product_id": product_id, "quantity": quantity}], request_id,
-                                                 movement_request=request_id)
+                                                 movement_request=request_id, buyer_key=buyer_key)
                 movement = connection.execute("SELECT * FROM movements WHERE order_id = ? ORDER BY id LIMIT 1", (order["id"],)).fetchone()
                 connection.commit()
                 return _movement_result(movement, duplicate)
@@ -396,7 +405,7 @@ def _migrate_business(connection):
         """CREATE TABLE IF NOT EXISTS orders (
             id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL,
             status TEXT NOT NULL CHECK (status IN ('completed', 'cancelled')),
-            total_cents INTEGER NOT NULL CHECK (total_cents >= 0),
+            total_cents INTEGER NOT NULL CHECK (total_cents >= 0), buyer_key TEXT,
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             cancelled_at TEXT, cancellation_reason TEXT NOT NULL DEFAULT '')""",
         """CREATE TABLE IF NOT EXISTS order_items (
@@ -426,6 +435,10 @@ def _migrate_business(connection):
     )
     for statement in statements:
         connection.execute(statement)
+    order_columns = {r["name"] for r in connection.execute("PRAGMA table_info(orders)")}
+    if "buyer_key" not in order_columns:
+        connection.execute("ALTER TABLE orders ADD COLUMN buyer_key TEXT")
+    connection.execute("CREATE INDEX IF NOT EXISTS orders_buyer_idx ON orders(buyer_key, created_at DESC, id)")
     if connection.execute("SELECT 1 FROM schema_migrations WHERE version = 2").fetchone():
         return
     # Existing prices were already captured. Older product names/units can only
@@ -529,12 +542,13 @@ def _insert_movement(connection, product_id, action, quantity, request_id, reaso
     return connection.execute("SELECT * FROM movements WHERE id = ?", (movement_id,)).fetchone()
 
 
-def _order_result(connection, order_id):
+def _order_result(connection, order_id, buyer_key=None):
     row = connection.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
-    if row is None:
+    if row is None or (buyer_key is not None and row["buyer_key"] != buyer_key):
         raise InventoryError("订单不存在", 404)
     result = dict(row)
     result.pop("fingerprint")
+    result.pop("buyer_key", None)
     result["items"] = [dict(r) for r in connection.execute("SELECT * FROM order_items WHERE order_id = ? ORDER BY id", (order_id,))]
     return result
 
@@ -557,13 +571,15 @@ def _order_items(value):
     return sorted(items, key=lambda item: item["product_id"])
 
 
-def _create_order(connection, items, request_id, movement_request=None):
+def _create_order(connection, items, request_id, movement_request=None, buyer_key=None, expected_prices=None):
     fingerprint = _fingerprint(items)
     previous = connection.execute("SELECT * FROM orders WHERE request_id = ?", (request_id,)).fetchone()
     if previous:
         if previous["fingerprint"] != fingerprint:
             raise InventoryError("请求编号已用于其他订单", 409)
-        return _order_result(connection, previous["id"]), True
+        if buyer_key is not None and previous["buyer_key"] != buyer_key:
+            raise InventoryError("请求编号已用于其他订单", 409)
+        return _order_result(connection, previous["id"], buyer_key), True
     products = []
     for item in items:
         product = connection.execute("SELECT * FROM products WHERE id = ?", (item["product_id"],)).fetchone()
@@ -574,10 +590,14 @@ def _create_order(connection, items, request_id, movement_request=None):
         if product["stock"] < item["quantity"]:
             raise InventoryError(f"{product['name']}库存不足", 409)
         products.append(product)
+    if expected_prices is not None:
+        for product, item in zip(products, items):
+            if expected_prices.get(product["id"]) != product["price_cents"]:
+                raise InventoryError("商品价格已变化，请重新确认", 409)
     order_id = uuid.uuid4().hex
     total = sum(p["price_cents"] * item["quantity"] for p, item in zip(products, items))
-    connection.execute("INSERT INTO orders(id, request_id, fingerprint, status, total_cents) VALUES (?, ?, ?, 'completed', ?)",
-                       (order_id, request_id, fingerprint, total))
+    connection.execute("INSERT INTO orders(id, request_id, fingerprint, status, total_cents, buyer_key) VALUES (?, ?, ?, 'completed', ?, ?)",
+                       (order_id, request_id, fingerprint, total, buyer_key))
     for i, (product, item) in enumerate(zip(products, items)):
         _change_stock(connection, product["id"], -item["quantity"])
         movement = _insert_movement(connection, product["id"], "purchase", item["quantity"],
@@ -589,13 +609,14 @@ def _create_order(connection, items, request_id, movement_request=None):
     return _order_result(connection, order_id), False
 
 
-def create_order(payload, db_path=None):
+def create_order(payload, db_path=None, buyer_key=None, expected_prices=None):
     items = _order_items(payload.get("items"))
     request_id = _request_id(payload.get("request_id"))
     with closing(connect(db_path)) as connection:
         begin_write(connection)
         try:
-            order, duplicate = _create_order(connection, items, request_id)
+            order, duplicate = _create_order(connection, items, request_id, buyer_key=buyer_key,
+                                             expected_prices=expected_prices)
             connection.commit()
             return {"order": order, "duplicate": duplicate}
         except Exception:
@@ -603,18 +624,18 @@ def create_order(payload, db_path=None):
             raise
 
 
-def cancel_order(order_id, payload, db_path=None):
+def cancel_order(order_id, payload, db_path=None, buyer_key=None):
     reason = _text(payload.get("reason"), "取消原因", 200)
     request_id = _request_id(payload.get("request_id"))
     fingerprint = _fingerprint([order_id, reason])
     with closing(connect(db_path)) as connection:
         begin_write(connection)
         try:
+            order = _order_result(connection, order_id, buyer_key)
             previous = _memo(connection, "cancel", request_id, fingerprint)
             if previous:
                 connection.commit()
                 return previous
-            order = _order_result(connection, order_id)
             changed = order["status"] == "completed"
             if changed:
                 for item in order["items"]:
@@ -625,7 +646,7 @@ def cancel_order(order_id, payload, db_path=None):
                 connection.execute("""UPDATE orders SET status = 'cancelled', cancellation_reason = ?,
                     cancelled_at = ? WHERE id = ?""", (reason, cancelled_at, order_id))
                 _audit(connection, "order_cancel", order_id, request_id, {"status": "completed"}, {"reason": reason, "total_cents": order["total_cents"]})
-            result = {"order": _order_result(connection, order_id), "changed": changed, "duplicate": False}
+            result = {"order": _order_result(connection, order_id, buyer_key), "changed": changed, "duplicate": False}
             _remember(connection, "cancel", request_id, fingerprint, result)
             connection.commit()
             return result
@@ -634,9 +655,9 @@ def cancel_order(order_id, payload, db_path=None):
             raise
 
 
-def get_order(order_id, db_path=None):
+def get_order(order_id, db_path=None, buyer_key=None):
     with closing(connect(db_path)) as connection:
-        return _order_result(connection, order_id)
+        return _order_result(connection, order_id, buyer_key)
 
 
 def _page(value):
@@ -645,17 +666,19 @@ def _page(value):
     return value
 
 
-def list_orders(page=1, status="", db_path=None):
+def list_orders(page=1, status="", db_path=None, buyer_key=None):
     _page(page)
     if status not in ("", "completed", "cancelled"):
         raise InventoryError("订单状态无效")
+    where = "(? = '' OR status = ?)" + (" AND buyer_key = ?" if buyer_key is not None else "")
+    args = (status, status) + ((buyer_key,) if buyer_key is not None else ())
     with closing(connect(db_path)) as connection:
         begin_read(connection)
-        count = connection.execute("SELECT COUNT(*) FROM orders WHERE ? = '' OR status = ?", (status, status)).fetchone()[0]
+        count = connection.execute(f"SELECT COUNT(*) FROM orders WHERE {where}", args).fetchone()[0]
         pages = max(1, (count + 9) // 10)
         page = min(page, pages)
-        ids = connection.execute("SELECT id FROM orders WHERE ? = '' OR status = ? ORDER BY created_at DESC, id DESC LIMIT 10 OFFSET ?",
-                                 (status, status, (page - 1) * 10)).fetchall()
+        ids = connection.execute(f"SELECT id FROM orders WHERE {where} ORDER BY created_at DESC, id DESC LIMIT 10 OFFSET ?",
+                                 args + ((page - 1) * 10,)).fetchall()
         return {"orders": [_order_result(connection, r["id"]) for r in ids], "count": count, "page": page, "pages": pages, "page_size": 10}
 
 

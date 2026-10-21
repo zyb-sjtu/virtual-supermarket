@@ -2,7 +2,33 @@
 
 ## Unreleased
 
-下一轮优先推进身份权限、分类/货架管理、购物车与价格查询；对应任务见 [TASKS.md](TASKS.md)。本节随代码更新记录实际变更，不预先标记完成。
+### 新增
+
+- 新增演示级身份入口 `/login`：无需账号密码，手动选择“商户”或“顾客”；商户进入 `/merchant`，顾客进入 `/customer`。
+- 新增服务端角色会话与接口权限矩阵：未登录 401、角色不符 403、页面错误角色自动重定向。
+- 新增顾客选购页：在售商品搜索/分页、购买、当前会话订单查看与取消、退出登录。
+- 商户后台增加角色标识与退出登录，并按权限移除商户端购买入口。
+- `orders` 新增匿名 `buyer_key`，顾客只能访问当前会话自己的订单；历史订单对顾客不可见。
+- 新增 [权限与角色设计](docs/权限与角色设计.md) 及 4 项权限测试；SQLite 37 项 + PostgreSQL 15 项测试通过。
+- 新增 [Agent工具封装设计](docs/Agent工具接口设计.md)：工具分类、Python Registry、HTTP Adapter、确认令牌、P1 范围和逐工具实现方式。
+- 新增 P1 Agent 工具封装：
+  - `agent_registry.py`：ToolSpec/ToolContext/ToolCall/Registry、角色过滤、受限 JSON Schema、错误映射和确认校验；
+  - `agent_confirmations.py`：内存确认令牌、pending/approved/consumed/expired 状态与参数指纹；
+  - `agent_tools.py`：11 个只读工具和顾客 `prepare_order`/`commit_order`；
+  - `server.py` 新增 `GET /api/agent/tools`、`POST /api/agent/tools/{name}`、确认查询/审批端点；
+  - 订单提交增加预期价格复验，价格/库存变化返回 `CONFIRMATION_STALE`；
+  - 新增 5 项 Agent 工具测试，覆盖角色过滤、只读不改库、订单隔离、prepare/approve/commit、幂等和确认失败。
+- 本机修复 PowerShell 脚本编码与 PostgreSQL 中文路径问题，增加一键启动/停止入口（本地运行文件，不纳入上传）。
+- 新增 10.20 周报和 P1 演示视频，归档本周身份权限与 Agent 工具封装结果。
+
+### 限制
+
+- 角色选择不是真实认证，任何人可选择商户；没有账号密码、持久化会话、审计操作人和跨会话订单归属。
+- P1 Agent 工具只有 11 个只读工具和顾客下单确认；商品详情、价格/库存筛选、购物车、商户写工具和全部 AI 工具未实现。
+- 确认令牌保存在内存中，服务重启失效；生产需要数据库确认表和真实操作人绑定。
+- 本次本地改动未提交、未推送；远端 CI 尚未重跑。
+
+下一轮可推进 P1 工具的商户写操作、商品详情/筛选，或继续分类/货架与价格查询；对应任务见 [TASKS.md](TASKS.md)。本节随代码更新记录实际变更，不预先标记完成。
 
 ## v1.4.1 — 2026-10-14
 

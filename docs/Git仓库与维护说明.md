@@ -3,7 +3,7 @@
 ## 仓库与文件边界
 
 - 仓库：<https://github.com/zyb-sjtu/virtual-supermarket>。
-- 可见性：私有；浏览器需要登录有权限的 `zyb-sjtu` 账号或已获授权账号，未登录可能显示 404。
+- 可见性：当前可匿名克隆；如需私有请在 GitHub 调整仓库可见性。
 - 默认分支：`main`。本机项目目录 `E:\shop` 已配置 `origin`。
 - 提交内容：43 个源代码、测试、配置、任务规划、运行文档及最终报告文件；本维护文档加入后为 44 个文件。
 - 不提交：实际密码、`.local/`、数据库与备份、`.venv/`、`.tools/`、`.tmp/`、报告中间制作文件。
@@ -63,7 +63,7 @@ git push -u origin feat/role-permissions
 
 ## 首次交付证据
 
-- 基线提交 `1da1f5d` 已从私有远程重新克隆，43 个文件的 Git blob 全部匹配。
+- 基线提交 `1da1f5d` 已从远程重新克隆，43 个文件的 Git blob 全部匹配。
 - 重新克隆的代码使用独立 `shop_test` 库，28 项 SQLite + 15 项 PostgreSQL 共 43 项测试通过，语法与进度检查通过。
 - 首次 CI 暴露 PostgreSQL 引导超级用户不能降级，提交 `d510ac8` 修复为单独创建普通业务账号。
 - 修复提交的 [五项 CI](https://github.com/zyb-sjtu/virtual-supermarket/actions/runs/38540057987) 已全部成功，包含真实 PostgreSQL 17 Linux 服务和 Windows/Linux Python 回归。

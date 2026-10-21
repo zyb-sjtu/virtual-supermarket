@@ -1,4 +1,4 @@
-param([ValidateRange(1024,65535)][int]$DatabasePort = 5433,
+﻿param([ValidateRange(1024,65535)][int]$DatabasePort = 5433,
       [ValidateRange(1024,65535)][int]$WebPort = 8000)
 $ErrorActionPreference = 'Stop'
 . $PSScriptRoot\Environment.ps1

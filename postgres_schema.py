@@ -17,7 +17,7 @@ STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS orders (
         id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN ('completed','cancelled')),
-        total_cents BIGINT NOT NULL CHECK (total_cents >= 0),
+        total_cents BIGINT NOT NULL CHECK (total_cents >= 0), buyer_key TEXT,
         cancelled_at TEXT, cancellation_reason TEXT NOT NULL DEFAULT '', created_at """ + TIMESTAMP + ")",
     """CREATE TABLE IF NOT EXISTS movements (
         id BIGSERIAL PRIMARY KEY, request_id TEXT NOT NULL UNIQUE,
@@ -55,7 +55,9 @@ STATEMENTS = [
         stock_after BIGINT NOT NULL CHECK (stock_after >= 0), created_at """ + TIMESTAMP + ")",
     "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)",
     "CREATE INDEX IF NOT EXISTS inventory_product_idx ON inventory_entries(product_id,id)",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS buyer_key TEXT",
     "CREATE INDEX IF NOT EXISTS order_created_idx ON orders(created_at DESC,id)",
+    "CREATE INDEX IF NOT EXISTS orders_buyer_idx ON orders(buyer_key, created_at DESC, id)",
     "CREATE INDEX IF NOT EXISTS items_product_idx ON order_items(product_id)",
     "CREATE INDEX IF NOT EXISTS movements_created_idx ON movements(id DESC)",
 ]

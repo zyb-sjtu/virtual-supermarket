@@ -1,4 +1,4 @@
-param([ValidatePattern('^[a-z][a-z0-9-]*$')][string]$Cluster = 'main')
+﻿param([ValidatePattern('^[a-z][a-z0-9-]*$')][string]$Cluster = 'main')
 $ErrorActionPreference = 'Stop'
 . $PSScriptRoot\Environment.ps1
 $ShopData = Join-Path $ShopRoot ('data\postgresql\' + $Cluster)

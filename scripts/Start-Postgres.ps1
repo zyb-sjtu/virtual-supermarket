@@ -1,4 +1,4 @@
-param([ValidateRange(1024,65535)][int]$Port = 5433,
+﻿param([ValidateRange(1024,65535)][int]$Port = 5433,
       [ValidatePattern('^[a-z][a-z0-9-]*$')][string]$Cluster = 'main')
 $ErrorActionPreference = 'Stop'
 . $PSScriptRoot\Environment.ps1

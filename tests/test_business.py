@@ -18,6 +18,7 @@ from db import (InventoryError, initialize, snapshot, create_product, move_stock
 from maintenance import backup_database, restore_database
 from runtime import DatabaseLease
 from server import ShopHandler
+from tests.session_helpers import login
 
 
 class BusinessTests(unittest.TestCase):
@@ -209,6 +210,8 @@ class BusinessHttpTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever,daemon=True)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_port}"
+        self.merchant, _ = login(self.base, "merchant")
+        self.customer, _ = login(self.base, "customer")
 
     def tearDown(self):
         self.server.shutdown()
@@ -217,35 +220,35 @@ class BusinessHttpTests(unittest.TestCase):
         self.env.stop()
         self.temp.cleanup()
 
-    def send(self, path, data, method="POST"):
+    def send(self, path, data, method="POST", opener=None):
         request = Request(self.base+path, json.dumps(data).encode(), headers={"Content-Type":"application/json"}, method=method)
-        with urlopen(request) as response:
+        with (opener or self.merchant).open(request) as response:
             return json.load(response)
 
     def test_new_http_workflows_and_exports(self):
-        order = self.send("/api/orders", {"request_id":"http-order", "items":[{"product_id":"apple","quantity":2}]})["order"]
+        order = self.send("/api/orders", {"request_id":"http-order", "items":[{"product_id":"apple","quantity":2}]}, opener=self.customer)["order"]
         self.send("/api/products/apple", {"price_cents":680, "version":1, "request_id":"http-edit"}, "PATCH")
-        self.send(f"/api/orders/{order['id']}/cancel", {"reason":"测试取消", "request_id":"http-cancel"})
+        self.send(f"/api/orders/{order['id']}/cancel", {"reason":"测试取消", "request_id":"http-cancel"}, opener=self.customer)
         self.send("/api/inventory/adjust", {"product_id":"apple","delta":-1,"reason":"盘点差异","request_id":"http-adjust"})
         for path, field in (("/api/orders","orders"),("/api/inventory?product_id=apple","entries"),("/api/audit","events")):
-            with urlopen(self.base+path) as response:
+            with self.merchant.open(self.base+path) as response:
                 self.assertTrue(json.load(response)[field])
         for kind in ("products","orders","inventory","audit"):
-            with urlopen(self.base+"/api/export?kind="+kind) as response:
+            with self.merchant.open(self.base+"/api/export?kind="+kind) as response:
                 rows = list(csv.reader(io.StringIO(response.read().decode("utf-8-sig"))))
                 self.assertGreater(len(rows),1)
         self.assertTrue(integrity_report(self.db)["ok"])
 
     def test_csv_formula_text_and_bad_payloads(self):
         self.send("/api/products", {"name":"=1+2", "price_cents":100,"request_id":"formula"})
-        with urlopen(self.base+"/api/export?kind=products") as response:
+        with self.merchant.open(self.base+"/api/export?kind=products") as response:
             text = response.read().decode("utf-8-sig")
             self.assertIn("'=1+2",text)
         with self.assertRaises(HTTPError) as raised:
-            self.send("/api/orders", {"items":"not a list","request_id":"bad"})
+            self.send("/api/orders", {"items":"not a list","request_id":"bad"}, opener=self.customer)
         self.assertEqual(raised.exception.code,400)
         with self.assertRaises(HTTPError) as raised:
-            urlopen(self.base+"/api/inventory?page=0")
+            self.merchant.open(self.base+"/api/inventory?page=0")
         self.assertEqual(raised.exception.code,400)
 
 

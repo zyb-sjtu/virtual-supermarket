@@ -1,10 +1,17 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $ShopRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $ShopRoot
 try {
     if (-not (Test-Path -LiteralPath '.venv\Scripts\python.exe')) {
-        py -m venv .venv
-        if ($LASTEXITCODE -ne 0) { throw 'Python 虚拟环境创建失败' }
+        $venvCreated = $false
+        if (Get-Command py -ErrorAction SilentlyContinue) {
+            & py -m venv .venv
+            $venvCreated = ($LASTEXITCODE -eq 0)
+        }
+        if (-not $venvCreated) {
+            & python -m venv .venv
+            if ($LASTEXITCODE -ne 0) { throw 'Python 虚拟环境创建失败' }
+        }
     }
     . $PSScriptRoot\Environment.ps1
     & $ShopPython -m pip install -r requirements.txt

@@ -1,0 +1,234 @@
+:root {
+  --ink: #1f2d24;
+  --muted: #6d7a70;
+  --green: #2f5d3a;
+  --green-dark: #244a2e;
+  --paper: #f8f8f4;
+  --card: #ffffff;
+  --line: #e4e8df;
+  --orange: #e88645;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(232, 134, 69, .16), transparent 30%),
+    radial-gradient(circle at 85% 80%, rgba(47, 93, 58, .14), transparent 32%),
+    var(--paper);
+  color: var(--ink);
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.login-shell {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(420px, 560px);
+  gap: 56px;
+  align-items: center;
+  width: min(1180px, calc(100% - 64px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 56px 0;
+}
+
+.login-brand {
+  position: relative;
+  padding: 48px;
+  border-radius: 32px;
+  background: var(--green);
+  color: #f9fbf6;
+  overflow: hidden;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.login-brand::after {
+  content: "🍎";
+  position: absolute;
+  right: -28px;
+  bottom: -42px;
+  font-size: 210px;
+  opacity: .18;
+  transform: rotate(-12deg);
+}
+
+.brand-mark {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .14);
+  font-size: 28px;
+  margin-bottom: 28px;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: var(--orange);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .16em;
+}
+
+.login-brand .eyebrow { color: #f2c39c; }
+
+.login-brand h1 {
+  margin: 0 0 20px;
+  font-size: clamp(42px, 7vw, 72px);
+  line-height: 1.05;
+  letter-spacing: -.04em;
+}
+
+.login-brand h1 span {
+  font-size: .42em;
+  font-weight: 400;
+  opacity: .8;
+  margin-left: 8px;
+  letter-spacing: 0;
+}
+
+.login-brand p {
+  max-width: 360px;
+  margin: 0;
+  color: rgba(249, 251, 246, .78);
+  line-height: 1.9;
+}
+
+.brand-sticker {
+  position: relative;
+  z-index: 1;
+  align-self: flex-start;
+  margin-top: 40px;
+  padding: 16px 20px;
+  border-radius: 18px;
+  background: #f7e8d9;
+  color: #6f4527;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.brand-sticker strong { font-size: 16px; }
+
+.login-panel { padding: 16px 0; }
+
+.login-panel h2 {
+  margin: 0 0 12px;
+  font-size: clamp(30px, 4vw, 44px);
+  letter-spacing: -.03em;
+}
+
+.lead {
+  margin: 0 0 30px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.role-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.role-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 230px;
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--card);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 18px 40px rgba(31, 45, 36, .06);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  font: inherit;
+}
+
+.role-card:hover {
+  transform: translateY(-4px);
+  border-color: #b9c9b6;
+  box-shadow: 0 24px 50px rgba(31, 45, 36, .12);
+}
+
+.role-card:disabled { cursor: wait; opacity: .6; }
+
+.role-card strong { font-size: 26px; }
+
+.role-card span:not(.role-icon) {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.role-card em {
+  margin-top: auto;
+  color: var(--green);
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.role-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: #edf2e9;
+  color: var(--green);
+  font-size: 24px;
+}
+
+.role-card.customer .role-icon {
+  background: #fbeee2;
+  color: #b9652f;
+}
+
+.role-card.customer em { color: #b9652f; }
+
+.login-error {
+  min-height: 22px;
+  margin: 18px 0 0;
+  color: #b23b36;
+  font-size: 14px;
+}
+
+.login-note {
+  margin: 18px 0 0;
+  padding-top: 18px;
+  border-top: 1px dashed var(--line);
+  color: #8a958c;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+@media (max-width: 900px) {
+  .login-shell {
+    grid-template-columns: 1fr;
+    width: min(680px, calc(100% - 32px));
+    gap: 24px;
+    padding: 24px 0 40px;
+  }
+
+  .login-brand {
+    min-height: auto;
+    padding: 34px;
+    border-radius: 26px;
+  }
+
+  .brand-sticker { margin-top: 24px; }
+}
+
+@media (max-width: 520px) {
+  .role-grid { grid-template-columns: 1fr; }
+  .role-card { min-height: 190px; }
+  .login-brand h1 { font-size: 44px; }
+}

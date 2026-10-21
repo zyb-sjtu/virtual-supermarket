@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f8f4">
+  <title>鲜邻 · 选择身份</title>
+  <link rel="stylesheet" href="/login.css">
+  <script src="/login.js" defer></script>
+</head>
+<body>
+  <main class="login-shell">
+    <section class="login-brand" aria-label="鲜邻超市">
+      <div class="brand-mark">✳</div>
+      <p class="eyebrow">LOCAL MARKET · DEMO</p>
+      <h1>鲜邻<span>Market</span></h1>
+      <p>新鲜好物，一目了然。<br>选择身份，进入你的工作台或购物页面。</p>
+      <div class="brand-sticker">无需账号密码<br><strong>选择身份即可进入</strong></div>
+    </section>
+
+    <section class="login-panel">
+      <p class="eyebrow">CHOOSE YOUR ROLE</p>
+      <h2>今天以什么身份进入？</h2>
+      <p class="lead">这是演示用的角色选择入口，不同身份会进入不同页面并受到不同的接口权限限制。</p>
+
+      <div class="role-grid">
+        <button class="role-card" data-role="merchant" type="button">
+          <span class="role-icon">▤</span>
+          <strong>商户</strong>
+          <span>管理商品、库存、订单与审计</span>
+          <em>进入管理后台 →</em>
+        </button>
+        <button class="role-card customer" data-role="customer" type="button">
+          <span class="role-icon">▦</span>
+          <strong>顾客</strong>
+          <span>浏览商品、购买并查看当前会话订单</span>
+          <em>进入顾客页面 →</em>
+        </button>
+      </div>
+
+      <p id="login-error" class="login-error" role="alert"></p>
+      <p class="login-note">演示说明：本入口不校验账号密码，任何人都可以选择任一身份。它只用于演示页面与接口权限，不是真实身份认证。</p>
+    </section>
+  </main>
+</body>
+</html>

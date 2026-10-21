@@ -44,3 +44,14 @@
 .ledger-list{max-height:48vh;overflow:auto;font-size:11px}.ledger-entry{display:flex;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid var(--border)}.ledger-entry>div:first-child{min-width:0}.ledger-entry strong{font-size:11px;color:#527c60}.ledger-entry p{font-size:11px;color:#809685;line-height:1.6;margin:6px 0;overflow-wrap:anywhere}.ledger-entry small{color:#a4b0a6;font-size:9px}.ledger-amount{display:grid;gap:7px;align-content:start;justify-items:end;flex:none}
 #import-fields{border:0;padding:0;margin:0;min-width:0}.remove-image{font-weight:400!important;display:flex;align-items:center;gap:8px}.remove-image[hidden]{display:none}.remove-image input{width:auto!important;margin:0!important}.listing-form-grid [hidden]{display:none}.listing-form-grid input:disabled{background:#edf1ea;color:#8a9a8d}
 @media(max-width:760px){#products.section-heading{flex-wrap:wrap;align-items:start}.catalog-search{flex-wrap:wrap}.catalog-search input{flex-basis:55%}.catalog-search select{flex:1}.catalog-search button{padding:10px 16px}.order-row{padding:15px;gap:12px}.order-summary strong{font-size:14px}.export-panel{gap:12px}}
+
+/* Role session and merchant-side actions. */
+.topbar-right{gap:14px}
+.role-badge{background:#eaf1e9;color:#4f7c5b;border-radius:999px;padding:7px 11px;font-size:10px;font-weight:800;white-space:nowrap}
+.logout-button{border:1px solid #dce6dc;background:#fff;color:#718574;border-radius:8px;padding:8px 11px;font-size:10px;font-weight:700;white-space:nowrap}
+.logout-button:hover{background:#eaf4ea;color:#387654}
+.card-actions{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.relist-button{background:#fff;border:1px solid #c8ddce;color:#458463;border-radius:8px;min-height:37px;font-size:11px;font-weight:800}
+.relist-button:hover{background:#eef6ee}
+.relist-button[hidden]{display:none}
+@media(max-width:760px){.topbar-right{gap:8px}.role-badge{display:none}}
