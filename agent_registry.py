@@ -101,17 +101,27 @@ class ToolRegistry:
                 raise ToolError(error.code, str(error), error.status) from error
         call = ToolCall(context, arguments, request_id, confirmation_id, confirmation)
         try:
-            result = spec.handler(call)
+            return spec.handler(call)
         except InventoryError as error:
+            self._release(spec, confirmation_id, context, request_id)
             raise _inventory_tool_error(error) from error
         except agent_confirmations.ConfirmationError as error:
+            self._release(spec, confirmation_id, context, request_id)
             raise ToolError(error.code, str(error), error.status) from error
-        if spec.requires_confirmation:
-            try:
-                self._confirmations.consume(confirmation_id, context.role, context.buyer_key, request_id)
-            except agent_confirmations.ConfirmationError as error:
-                raise ToolError(error.code, str(error), error.status) from error
-        return result
+        except Exception:
+            self._release(spec, confirmation_id, context, request_id)
+            raise
+
+    def _release(self, spec: ToolSpec, confirmation_id: str, context: ToolContext,
+                 request_id: str | None) -> None:
+        if not spec.requires_confirmation:
+            return
+        try:
+            self._confirmations.release(confirmation_id, context.role, context.buyer_key, request_id)
+        except Exception:
+            # The original handler error is more useful; a stuck consumed token
+            # is a safe failure and requires a fresh prepare.
+            pass
 
 
 def validate_arguments(schema: dict, value) -> None:

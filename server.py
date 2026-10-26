@@ -18,8 +18,8 @@ import auth
 import agent_confirmations
 import agent_tools
 from agent_registry import ToolContext, ToolError
-from db import (InventoryError, initialize, move_stock, snapshot, create_product, product_image, set_product_status,
-                create_order, cancel_order, get_order, list_orders, edit_product, adjust_inventory,
+from db import (InventoryError, initialize, move_stock, snapshot, create_product, product_image, get_product,
+                set_product_status, create_order, cancel_order, get_order, list_orders, edit_product, adjust_inventory,
                 import_products, inventory_history, audit_history, export_records, database_path, connect, CATEGORIES)
 from runtime import DatabaseLease
 from storage import backend, postgres_options, DATABASE_ERRORS
@@ -37,6 +37,27 @@ ASSETS = {
     "/product-placeholder.svg": ("product-placeholder.svg", "image/svg+xml"),
     "/import-template.json": ("import-template.json", "application/json; charset=utf-8"),
 }
+
+
+def _query_int(query, name: str, label: str):
+    raw = query.get(name, [""])[0]
+    if raw == "":
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        raise InventoryError(f"{label}必须是整数") from None
+
+
+def _query_bool(query, name: str, label: str):
+    raw = query.get(name, [""])[0]
+    if raw == "":
+        return None
+    if raw in ("1", "true", "True"):
+        return True
+    if raw in ("0", "false", "False"):
+        return False
+    raise InventoryError(f"{label}必须是布尔值")
 
 
 class ShopHandler(BaseHTTPRequestHandler):
@@ -102,10 +123,14 @@ class ShopHandler(BaseHTTPRequestHandler):
                 if session["role"] == auth.CUSTOMER:
                     status = "active"
                 state = snapshot(page=int(query.get("page", ["1"])[0]), status=status,
-                                 search=query.get("search", [""])[0], category=query.get("category", [""])[0])
+                                 search=query.get("search", [""])[0], category=query.get("category", [""])[0],
+                                 min_price_cents=_query_int(query, "min_price_cents", "最低价格"),
+                                 max_price_cents=_query_int(query, "max_price_cents", "最高价格"),
+                                 in_stock=_query_bool(query, "in_stock", "库存筛选"),
+                                 sort=query.get("sort", [""])[0])
                 if session["role"] == auth.CUSTOMER:
                     state = {key: state[key] for key in
-                             ("products", "page", "page_size", "status", "pages", "product_count")}
+                             ("products", "page", "page_size", "status", "pages", "product_count", "filters")}
                 self._json(HTTPStatus.OK, state)
                 return
             if path == "/api/orders":
@@ -149,6 +174,13 @@ class ShopHandler(BaseHTTPRequestHandler):
                 for row in rows:
                     writer.writerow(["'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value for value in row])
                 self._bytes(200, output.getvalue().encode("utf-8-sig"), "text/csv; charset=utf-8", f'{kind}.csv')
+                return
+            if len(parts) == 3 and parts[:2] == ["api", "products"]:
+                session = self._require_api((auth.MERCHANT, auth.CUSTOMER))
+                if session is None:
+                    return
+                product = get_product(parts[2], active_only=session["role"] == auth.CUSTOMER)
+                self._json(HTTPStatus.OK, {"product": product})
                 return
             if len(parts) == 4 and parts[:2] == ["api", "products"] and parts[3] == "image":
                 if self._require_api((auth.MERCHANT, auth.CUSTOMER)) is None:

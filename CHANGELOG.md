@@ -4,16 +4,24 @@
 
 ### 新增
 
+- Agent 工具从 13 个扩展到 19 个（顾客 11、商户 8）：
+  - 新增单商品详情 `customer.get_product` / `merchant.get_product` 与 `GET /api/products/{id}`；
+  - 搜索工具与 `/api/state` 增加价格区间、库存、排序参数（仍固定每页 6 个）；
+  - 新增顾客 `prepare_buy_now` / `commit_buy_now`、`prepare_order_cancel` / `commit_order_cancel`，均走确认令牌和幂等 request_id。
+- 确认令牌改为数据库表 `agent_confirmations`（SQLite/PostgreSQL），支持跨进程/重启保留、过期、所有权校验和清理；`validate_for_commit` 改为原子 claim，handler 失败时 release，避免同一确认被并发提交两次。
+- 新增 `agent_runtime.py`：通过 `GET /api/agent/tools` 发现工具、执行 planner 动作、处理审批和自动 request_id；新增 `agent_demo.py` 确定性演示，跑通搜索→详情→购买→取消 10 步流程，支持同会话 run-id 重放。
+- 新增 6 项 Agent 工具测试、4 项编排测试和 1 项筛选测试；本机 SQLite 48 项、PostgreSQL 18 项通过，共 66 项。
+- 新增 `docs/AgentP2演示.mp4`（38 秒，1280×720）：工具目录、10 步购买/取消、确认令牌与同 run-id 重放；演示使用真实 `agent_demo.py` 输出，不调用 LLM。
 - 新增演示级身份入口 `/login`：无需账号密码，手动选择“商户”或“顾客”；商户进入 `/merchant`，顾客进入 `/customer`。
 - 新增服务端角色会话与接口权限矩阵：未登录 401、角色不符 403、页面错误角色自动重定向。
 - 新增顾客选购页：在售商品搜索/分页、购买、当前会话订单查看与取消、退出登录。
 - 商户后台增加角色标识与退出登录，并按权限移除商户端购买入口。
 - `orders` 新增匿名 `buyer_key`，顾客只能访问当前会话自己的订单；历史订单对顾客不可见。
-- 新增 [权限与角色设计](docs/权限与角色设计.md) 及 4 项权限测试；SQLite 37 项 + PostgreSQL 15 项测试通过。
-- 新增 [Agent工具封装设计](docs/Agent工具接口设计.md)：工具分类、Python Registry、HTTP Adapter、确认令牌、P1 范围和逐工具实现方式。
+- 新增 [权限与角色设计](docs/权限与角色设计.md) 及 4 项权限测试（P1 阶段 37+15 项，本次 P2 扩展后 48+18 项）。
+- 新增 [Agent工具封装设计](docs/Agent工具接口设计.md)：工具分类、Python Registry、HTTP Adapter、确认令牌、P1/P2 范围和逐工具实现方式。
 - 新增 P1 Agent 工具封装：
   - `agent_registry.py`：ToolSpec/ToolContext/ToolCall/Registry、角色过滤、受限 JSON Schema、错误映射和确认校验；
-  - `agent_confirmations.py`：内存确认令牌、pending/approved/consumed/expired 状态与参数指纹；
+  - `agent_confirmations.py`：确认令牌状态机与参数指纹（P1 初版为内存，P2 已改为数据库持久化）；
   - `agent_tools.py`：11 个只读工具和顾客 `prepare_order`/`commit_order`；
   - `server.py` 新增 `GET /api/agent/tools`、`POST /api/agent/tools/{name}`、确认查询/审批端点；
   - 订单提交增加预期价格复验，价格/库存变化返回 `CONFIRMATION_STALE`；
@@ -24,11 +32,12 @@
 ### 限制
 
 - 角色选择不是真实认证，任何人可选择商户；没有账号密码、持久化会话、审计操作人和跨会话订单归属。
-- P1 Agent 工具只有 11 个只读工具和顾客下单确认；商品详情、价格/库存筛选、购物车、商户写工具和全部 AI 工具未实现。
-- 确认令牌保存在内存中，服务重启失效；生产需要数据库确认表和真实操作人绑定。
+- Agent 已实现 19 个工具，但购物车、商户写工具和全部 AI 工具未实现；网页筛选控件未新增。
+- 确认令牌已落库并支持过期/原子 claim，但审批仍是演示级会话身份，未绑定真实操作人、UI 审批页或完整工具调用审计；过期记录按 24 小时清理。
+- `agent_demo.py` 是确定性状态机，不调用 LLM；默认自动审批只用于演示，真实使用必须人工批准。
 - 本次本地改动未提交、未推送；远端 CI 尚未重跑。
 
-下一轮可推进 P1 工具的商户写操作、商品详情/筛选，或继续分类/货架与价格查询；对应任务见 [TASKS.md](TASKS.md)。本节随代码更新记录实际变更，不预先标记完成。
+下一轮可推进真实账号/安全会话、购物车/分类货架、价格历史，或另立任务实现商户 Agent 写工具；对应任务见 [TASKS.md](TASKS.md)。本节随代码更新记录实际变更，不预先标记完成。
 
 ## v1.4.1 — 2026-10-14
 

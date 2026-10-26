@@ -25,6 +25,8 @@ PRODUCTS = (
 CATEGORIES = ("水果", "蔬菜", "肉禽水产", "乳品饮料", "粮油食品", "日用百货", "其他")
 PRODUCT_COLUMNS = "id, sku, name, price_cents, stock, category, unit, description, zone, version, active, CASE WHEN image IS NOT NULL THEN 1 ELSE 0 END AS has_image"
 MAX_STOCK = 1000000000
+PAGE_SIZE = 6
+SORTS = ("default", "price_asc", "price_desc", "stock_desc", "name_asc")
 
 
 class InventoryError(Exception):
@@ -126,7 +128,16 @@ def _product_result(row) -> dict:
     return product
 
 
-def snapshot(db_path: Path | None = None, page: int = 1, status: str = "active", search: str = "", category: str = "") -> dict:
+def _price_filter(value, label: str):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100000000:
+        raise InventoryError(f"{label}必须是 0 到 100000000 的整数分")
+    return value
+
+
+def snapshot(db_path: Path | None = None, page: int = 1, status: str = "active", search: str = "", category: str = "",
+             min_price_cents=None, max_price_cents=None, in_stock=None, sort: str = "default") -> dict:
     if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= 1000000:
         raise InventoryError("页码必须是正整数")
     if status not in ("active", "inactive"):
@@ -135,18 +146,46 @@ def snapshot(db_path: Path | None = None, page: int = 1, status: str = "active",
     search = _text(search, "搜索词", 100, required=False)
     if category and category not in CATEGORIES:
         raise InventoryError("商品分类无效")
-    filters = "active = ? AND (? = '' OR category = ?) AND (? = '' OR lower(name || ' ' || sku) LIKE lower(?) ESCAPE '!')"
+    min_price_cents = _price_filter(min_price_cents, "最低价格")
+    max_price_cents = _price_filter(max_price_cents, "最高价格")
+    if min_price_cents is not None and max_price_cents is not None and min_price_cents > max_price_cents:
+        raise InventoryError("价格区间无效")
+    if in_stock is not None and not isinstance(in_stock, bool):
+        raise InventoryError("库存筛选无效")
+    sort = sort or "default"
+    if sort not in SORTS:
+        raise InventoryError("排序方式无效")
     pattern = '%' + search.replace('!', '!!').replace('%', '!%').replace('_', '!_') + '%'
-    args = (active, category, category, search, pattern)
+    conditions = ["active = ?", "(? = '' OR category = ?)",
+                  "(? = '' OR lower(name || ' ' || sku) LIKE lower(?) ESCAPE '!')"]
+    args = [active, category, category, search, pattern]
+    if min_price_cents is not None:
+        conditions.append("price_cents >= ?")
+        args.append(min_price_cents)
+    if max_price_cents is not None:
+        conditions.append("price_cents <= ?")
+        args.append(max_price_cents)
+    if in_stock is not None:
+        conditions.append("stock > 0" if in_stock else "stock = 0")
+    filters = " AND ".join(conditions)
     with closing(connect(db_path)) as connection:
         begin_read(connection)
         summary = connection.execute("""SELECT COUNT(*) AS total_count, COALESCE(SUM(stock), 0) AS stock_total,
             COALESCE(SUM(active), 0) AS active_count FROM products""").fetchone()
         count = connection.execute(f"SELECT COUNT(*) FROM products WHERE {filters}", args).fetchone()[0]
-        pages = max(1, (count + 5) // 6)
+        pages = max(1, (count + PAGE_SIZE - 1) // PAGE_SIZE)
         page = min(page, pages)
+        order = product_order(connection)
+        ordering = {
+            "default": order,
+            "price_asc": f"price_cents ASC, {order} ASC",
+            "price_desc": f"price_cents DESC, {order} ASC",
+            "stock_desc": f"stock DESC, {order} ASC",
+            "name_asc": f"name ASC, {order} ASC",
+        }[sort]
         products = [_product_result(row) for row in connection.execute(
-            f"SELECT {PRODUCT_COLUMNS} FROM products WHERE {filters} ORDER BY {product_order(connection)} LIMIT 6 OFFSET ?", args + ((page - 1) * 6,)
+            f"SELECT {PRODUCT_COLUMNS} FROM products WHERE {filters} ORDER BY {ordering} LIMIT {PAGE_SIZE} OFFSET ?",
+            args + [(page - 1) * PAGE_SIZE]
         )]
         movements = [dict(row) for row in connection.execute(
             """SELECT m.id AS id, m.request_id, m.action, m.product_id, m.product_name,
@@ -171,12 +210,14 @@ def snapshot(db_path: Path | None = None, page: int = 1, status: str = "active",
         status_count = connection.execute("SELECT COUNT(*) FROM product_status_changes WHERE changed = 1").fetchone()[0]
         extra_count = connection.execute("SELECT COUNT(*) FROM inventory_entries WHERE kind IN ('cancel', 'adjust')").fetchone()[0]
         refunded = connection.execute("SELECT COALESCE(SUM(total_cents), 0) FROM orders WHERE status = 'cancelled'").fetchone()[0]
-        return {"products": products, "movements": movements, "page": page, "page_size": 6, "status": status,
+        return {"products": products, "movements": movements, "page": page, "page_size": PAGE_SIZE, "status": status,
                 "pages": pages, "product_count": count, "stock_total": summary["stock_total"],
                 "active_count": summary["active_count"], "inactive_count": summary["total_count"] - summary["active_count"],
                 "movement_count": totals["movement_count"] + status_count + extra_count,
                 "sales_cents": totals["sales_cents"] - refunded, "gross_sales_cents": totals["sales_cents"],
-                "refunded_cents": refunded, "engine": backend(db_path)}
+                "refunded_cents": refunded, "engine": backend(db_path),
+                "filters": {"min_price_cents": min_price_cents, "max_price_cents": max_price_cents,
+                            "in_stock": in_stock, "sort": sort}}
 
 
 def create_product(payload: dict, db_path: Path | None = None) -> dict:
@@ -326,6 +367,15 @@ def product_by_id(product_id: str, db_path: Path | None = None) -> dict:
         return _product_result(row)
 
 
+def get_product(product_id: str, db_path: Path | None = None, active_only: bool = False) -> dict:
+    if not isinstance(product_id, str) or not product_id:
+        raise InventoryError("商品不存在", 404)
+    product = product_by_id(product_id, db_path)
+    if active_only and not product["active"]:
+        raise InventoryError("商品不存在", 404)
+    return product
+
+
 def move_stock(action: str, product_id: str, quantity: int, request_id: str,
                db_path: Path | None = None, buyer_key: str | None = None) -> dict:
     if action not in ("purchase", "restock"):
@@ -429,9 +479,17 @@ def _migrate_business(connection):
         """CREATE TABLE IF NOT EXISTS api_requests (
             scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result_json TEXT NOT NULL,
             PRIMARY KEY(scope, request_id))""",
+        """CREATE TABLE IF NOT EXISTS agent_confirmations (
+            id TEXT PRIMARY KEY, tool TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('customer', 'merchant')), buyer_key TEXT,
+            arguments_fingerprint TEXT NOT NULL, preview_json TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('pending', 'approved', 'consumed', 'expired')),
+            created_at REAL NOT NULL, expires_at REAL NOT NULL,
+            approved_at REAL, consumed_at REAL, consumed_request_id TEXT)""",
         "CREATE INDEX IF NOT EXISTS inventory_product_idx ON inventory_entries(product_id, id)",
         "CREATE INDEX IF NOT EXISTS order_created_idx ON orders(created_at DESC, id)",
         "CREATE INDEX IF NOT EXISTS items_product_idx ON order_items(product_id)",
+        "CREATE INDEX IF NOT EXISTS agent_confirmations_expiry_idx ON agent_confirmations(state, expires_at)",
     )
     for statement in statements:
         connection.execute(statement)
@@ -439,6 +497,7 @@ def _migrate_business(connection):
     if "buyer_key" not in order_columns:
         connection.execute("ALTER TABLE orders ADD COLUMN buyer_key TEXT")
     connection.execute("CREATE INDEX IF NOT EXISTS orders_buyer_idx ON orders(buyer_key, created_at DESC, id)")
+    connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES (4)")
     if connection.execute("SELECT 1 FROM schema_migrations WHERE version = 2").fetchone():
         return
     # Existing prices were already captured. Older product names/units can only

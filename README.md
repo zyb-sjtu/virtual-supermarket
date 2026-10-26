@@ -1,6 +1,6 @@
 # 鲜邻 · 超市管理系统 v1.4
 
-传统超市交易与库存管理 Demo。初始提供苹果、香蕉，支持自由上架、编辑价格、上下架、补货、购买、取消订单和库存调整。本轮对应十二周计划第一阶段的业务完善，不含 AI；暂不区分商家与客户。
+传统超市交易与库存管理 Demo。初始提供苹果、香蕉，支持自由上架、编辑价格、上下架、补货、购买、取消订单和库存调整。当前提供演示级商户/顾客身份选择与 Agent 工具接口，不含 AI。
 
 **项目进度：[TASKS.md](TASKS.md)　版本变化：[CHANGELOG.md](CHANGELOG.md)　后续维护规范：[AGENTS.md](AGENTS.md)。** 每次版本更新必须同步更新任务状态、验收证据与变更记录。
 
@@ -55,7 +55,7 @@ cd E:\shop
 8. **数据维护：** 页面下载商品、订单、库存台账、审计 CSV；命令行提供一致性检查、在线备份及停机恢复。
 9. **顾客选购：** 顾客页只展示在售商品，可搜索/分类筛选、按数量购买、查看当前会话订单并取消自己的订单；看不到销售额、后台流水、台账、审计和导出。
 
-商户后台每 5 秒刷新数据；顾客页在购买、取消后主动刷新商品和订单。金额指标使用“累计净销售额”：原购买金额减已取消订单金额。取消只是本 Demo 的库存与订单冲销，尚未连接实际支付、退款或物流系统。
+价格区间、库存和排序筛选已在 `/api/state` 与 Agent 搜索工具提供，网页筛选控件尚未新增。商户后台每 5 秒刷新数据；顾客页在购买、取消后主动刷新商品和订单。金额指标使用“累计净销售额”：原购买金额减已取消订单金额。取消只是本 Demo 的库存与订单冲销，尚未连接实际支付、退款或物流系统。
 
 ### 输入约束
 
@@ -81,9 +81,11 @@ flowchart LR
 | --- | --- |
 | `server.py` | 静态页面、身份路由、JSON API、Agent 工具路由、权限拦截、输入解析、CSV 导出、HTTP 错误响应 |
 | `auth.py` | 演示级角色会话、Cookie 令牌、角色常量；不持久化、不保存密码 |
-| `agent_registry.py` | Agent 工具注册表、角色过滤、受限 JSON Schema、错误映射和确认校验 |
-| `agent_confirmations.py` | 内存确认令牌、状态机、参数指纹和 TTL |
-| `agent_tools.py` | P1 Agent 工具：11 个只读工具 + 顾客 `prepare_order`/`commit_order` |
+| `agent_registry.py` | Agent 工具注册表、角色过滤、受限 JSON Schema、错误映射和确认查询/原子 claim |
+| `agent_confirmations.py` | 数据库确认令牌、状态机、参数指纹、TTL 和所有权校验 |
+| `agent_tools.py` | 19 个 Agent 工具：顾客 11、商户 8 |
+| `agent_runtime.py` | 通过 HTTP 发现工具、执行 planner 动作、处理审批和 request_id 的编排壳 |
+| `agent_demo.py` | 确定性购物/取消演示（非 LLM） |
 | `db.py` | 数据模型、迁移、商品管理、订单、库存台账、审计与查询；顾客订单按 `buyer_key` 隔离；订单支持预期价格复验 |
 | `storage.py` / `postgres_schema.py` | 数据库驱动、配置、事务边界及 PostgreSQL 表结构 |
 | `runtime.py` | SQLite 兼容模式的服务/恢复进程互斥 |
@@ -92,7 +94,8 @@ flowchart LR
 | `tests/test_shop.py` | 原交易、上架、上下架、分页、图片的回归测试 |
 | `tests/test_business.py` | 订单、版本冲突、台账、导入、迁移、维护与 HTTP 测试 |
 | `tests/test_permissions.py` | 角色页面、API 权限矩阵、顾客订单归属、退出登录测试 |
-| `tests/test_agent_tools.py` | Agent 工具列表、只读工具、订单隔离、prepare/approve/commit、幂等和确认失败测试 |
+| `tests/test_agent_tools.py` | 工具列表、详情/筛选、购买/取消、确认持久化、并发 claim、幂等和确认失败测试 |
+| `tests/test_agent_orchestration.py` | 编排端到端、同会话重放、拒绝审批和 CLI 会话复用测试 |
 | `tests/test_postgres.py` | PostgreSQL 并发、幂等、事务、图片与权限验证 |
 | `.github/workflows/tests.yml` | Windows/Linux 的单元测试与语法检查配置 |
 | `data/` | 默认数据文件与备份，不纳入版本控制 |
@@ -119,8 +122,9 @@ flowchart LR
 | GET | `/api/session` | 公开 | 当前角色会话，不返回令牌 |
 | POST | `/api/session` | 公开 | 选择身份，传 `{"role":"merchant"}` 或 `{"role":"customer"}`，无密码 |
 | POST | `/api/logout` | 公开 | 删除当前会话并清除 Cookie |
-| GET | `/api/state?page=1&status=active&search=&category=` | 商户/顾客 | 固定每页 6 个；顾客只能看 `active`，且响应不含销售额、流水、下架统计等后台字段 |
+| GET | `/api/state?page=1&status=active&search=&category=&min_price_cents=&max_price_cents=&in_stock=&sort=` | 商户/顾客 | 固定每页 6 个；支持价格/库存筛选与 `price_asc`/`price_desc`/`stock_desc`/`name_asc`；顾客只能看 `active`，且响应不含销售额、流水、下架统计等后台字段 |
 | GET | `/api/categories` | 商户/顾客 | 固定分类列表 |
+| GET | `/api/products/{id}` | 商户/顾客 | 单商品详情；顾客只能读取在售商品 |
 | GET | `/api/products/{id}/image` | 商户/顾客 | 商品图片 |
 | POST | `/api/products` | 商户 | 创建商品与初始库存 |
 | PATCH | `/api/products/{id}` | 商户 | 编辑资料，必须提供 `version` 和 `request_id` |
@@ -142,15 +146,23 @@ flowchart LR
 
 写请求使用 `Content-Type: application/json`。新建通常返回 201，重复返回 200、`duplicate: true`；PATCH 返回 200；库存不足、版本冲突、重复 SKU 或编号内容冲突返回 409。页码为正整数，超出末页自动返回末页。未登录访问受保护 API 返回 401，角色不匹配返回 403；页面访问错误角色会重定向到该角色自己的页面。完整矩阵见 [权限与角色设计](docs/权限与角色设计.md)。
 
-### Agent 工具（P1）
+### Agent 工具（P1/P2）
 
-`GET /api/agent/tools` 只返回当前角色可见的工具；`POST /api/agent/tools/{name}` 使用统一 envelope 调用。P1 已实现：
+`GET /api/agent/tools` 只返回当前角色可见的工具；`POST /api/agent/tools/{name}` 使用统一 envelope 调用。目前注册 19 个工具：
 
-- 顾客 4 个只读工具：分类、商品搜索、自己的订单列表/详情；
-- 商户 7 个只读工具：分类、商品列表、订单列表/详情、台账、审计、销售汇总；
-- 顾客 2 个下单工具：`customer.prepare_order` 预览并生成确认令牌，`customer.commit_order` 在 UI 批准后提交；提交时复验商品在售、库存和价格，变化返回 `CONFIRMATION_STALE`。
+- 顾客 11 个：分类、商品搜索（价格/库存/排序）、单商品详情、自己的订单列表/详情、`prepare_order`/`commit_order`、`prepare_buy_now`/`commit_buy_now`、`prepare_order_cancel`/`commit_order_cancel`；
+- 商户 8 个只读工具：分类、商品列表（含筛选）、商品详情、订单列表/详情、台账、审计、销售汇总。
 
-工具设计、56 个规划工具、Python Registry/HTTP Adapter 契约和 P2+ 路线见 [Agent工具封装设计](docs/Agent工具接口设计.md)。AI 工具未实现、未注册；当前确认令牌为内存存储，服务重启失效。
+确认令牌保存在 `agent_confirmations` 表（SQLite/PostgreSQL），支持过期、所有权校验和原子 claim；提交时复验商品在售、库存和价格，变化返回 `CONFIRMATION_STALE`。工具设计、57 个规划工具、Python Registry/HTTP Adapter 契约和 P2+ 路线见 [Agent工具封装设计](docs/Agent工具接口设计.md)。AI 工具未实现、未注册。
+
+确定性演示（不调用 LLM）：
+
+```powershell
+& $ShopPython agent_demo.py --base http://127.0.0.1:8000 --query 苹果 --run-id demo-001 --session-file .tmp\agent-demo-session.json
+# 再执行同一条命令：复用会话和 run-id，验证不重复扣库存
+```
+
+`agent_demo.py` 演示“搜索→详情→预览购买→批准→提交→查订单→预览取消→批准→取消→核对”，默认使用脚本审批策略；真实使用应由人/UI 批准。演示视频见 [AgentP2演示.mp4](docs/AgentP2演示.mp4)。
 
 创建商品示例：
 
@@ -201,16 +213,16 @@ $env:PGPORT = '5433'
 . .\scripts\Environment.ps1
 $env:SHOP_TEST_POSTGRES = '1'
 & $ShopPython -m unittest discover -s tests -v
-& $ShopPython -m py_compile auth.py agent_registry.py agent_confirmations.py agent_tools.py db.py server.py storage.py postgres_schema.py postgres_maintenance.py
+& $ShopPython -m py_compile auth.py agent_registry.py agent_confirmations.py agent_tools.py agent_runtime.py agent_demo.py db.py server.py storage.py postgres_schema.py postgres_maintenance.py
 node --check static/app.js
 node --check static/login.js
 node --check static/customer.js
 ```
 
-本机已通过 37 项 SQLite 回归测试（含 4 项角色权限测试、5 项 Agent 工具测试）与 15 项 PostgreSQL 测试，共 52 项，覆盖并发购买/取消、幂等、整单回滚、100 商品导入、快照、维护、校验、角色页面/API 权限、顾客订单隔离，以及 Agent 工具注册/角色过滤、只读不写库、prepare/approve/commit 和确认失败。PostgreSQL 测试强制使用专用 `shop_test`，每个用例会清空测试库；正式 `shop` 不受影响。未设置测试开关时 PostgreSQL 用例跳过。历史远端基线为 43 项测试与五项 CI；**本次本地改动未提交、未推送，远端 CI 尚未重新运行。**
+本机已通过 48 项 SQLite 回归测试与 18 项 PostgreSQL 测试，共 66 项，覆盖并发购买/取消、幂等、整单回滚、100 商品导入、快照、维护、校验、角色页面/API 权限、顾客订单隔离、Agent 工具注册/角色过滤、单商品详情、价格/库存筛选排序、buy_now/取消确认、确认令牌持久化与并发 claim、编排演示和同会话重放。PostgreSQL 测试强制使用专用 `shop_test`，每个用例会清空测试库；正式 `shop` 不受影响。未设置测试开关时 PostgreSQL 用例跳过。历史远端基线为 43 项测试与五项 CI；**本次本地改动未提交、未推送，远端 CI 尚未重新运行。**
 
 网页上架、改价、图片上传/移除、购买、取消、调整、台账、筛选、导入和 CSV 下载已在独立 PostgreSQL 测试库验证；本次新增的身份选择、商户/顾客页面、权限隔离和退出登录已通过本机 SQLite/PostgreSQL 自动化测试，桌面与移动端布局待人工复验。Node/Playwright 仅为验证依赖。
 
 隔离验证完成：备份从 5433 搬到 5434，全部业务表一致；修改验证库不影响正式库；停库后 HTTP 静态页面继续运行、数据/写入返回 503；重启后持久化数据不变。结果见 [验证报告](docs/postgresql-validation.json)。
 
-当前提供**演示级角色选择**（无账号密码），商户/顾客页面分流和 API 权限由服务端校验；这不是真实认证，也没有真实用户、密码、统一登录、审计操作人或跨会话订单归属。顾客订单仅在当前匿名会话内可见。P1 Agent 工具已实现 11 个只读工具和顾客下单确认；商户写工具、商品详情/筛选、购物车和 AI 工具仍未实现。真实支付、配送、多门店隔离仍未完成。数据库 TCP 分离已验证，尚未部署到云主机或做生产吞吐压测；公网部署前需完成真实身份与权限、HTTPS 和部署运维。当前按业务事务串行写入，连接池与细粒度并发控制可继续迭代。
+当前提供**演示级角色选择**（无账号密码），商户/顾客页面分流和 API 权限由服务端校验；这不是真实认证，也没有真实用户、密码、统一登录、审计操作人或跨会话订单归属。顾客订单仅在当前匿名会话内可见。Agent 工具已实现 19 个（顾客 11、商户 8），覆盖详情、筛选、购买与取消，确认令牌已落库；购物车、商户写工具、网页筛选控件和 AI 工具仍未实现，编排演示是确定性状态机而非 LLM。真实支付、配送、多门店隔离仍未完成。数据库 TCP 分离已验证，尚未部署到云主机或做生产吞吐压测；公网部署前需完成真实身份与权限、HTTPS 和部署运维。当前按业务事务串行写入，连接池与细粒度并发控制可继续迭代。

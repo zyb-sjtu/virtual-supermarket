@@ -46,6 +46,13 @@ STATEMENTS = [
     """CREATE TABLE IF NOT EXISTS api_requests (
         scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result_json TEXT NOT NULL,
         PRIMARY KEY(scope, request_id))""",
+    """CREATE TABLE IF NOT EXISTS agent_confirmations (
+        id TEXT PRIMARY KEY, tool TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('customer','merchant')), buyer_key TEXT,
+        arguments_fingerprint TEXT NOT NULL, preview_json TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending','approved','consumed','expired')),
+        created_at DOUBLE PRECISION NOT NULL, expires_at DOUBLE PRECISION NOT NULL,
+        approved_at DOUBLE PRECISION, consumed_at DOUBLE PRECISION, consumed_request_id TEXT)""",
     """CREATE TABLE IF NOT EXISTS product_creations (
         request_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
         product_id TEXT NOT NULL UNIQUE REFERENCES products(id), created_at """ + TIMESTAMP + ")",
@@ -60,6 +67,7 @@ STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS orders_buyer_idx ON orders(buyer_key, created_at DESC, id)",
     "CREATE INDEX IF NOT EXISTS items_product_idx ON order_items(product_id)",
     "CREATE INDEX IF NOT EXISTS movements_created_idx ON movements(id DESC)",
+    "CREATE INDEX IF NOT EXISTS agent_confirmations_expiry_idx ON agent_confirmations(state, expires_at)",
 ]
 
 
@@ -69,7 +77,7 @@ def initialize(seed=True):
         try:
             for statement in STATEMENTS:
                 connection.execute(statement)
-            connection.execute("INSERT INTO schema_migrations(version) VALUES (2), (3) ON CONFLICT DO NOTHING")
+            connection.execute("INSERT INTO schema_migrations(version) VALUES (2), (3), (4) ON CONFLICT DO NOTHING")
             if seed:
                 from db import _ledger, PRODUCTS
                 for product_id, name, price, stock in PRODUCTS:

@@ -15,6 +15,7 @@ from postgres_schema import initialize
 
 TABLES = ('products', 'orders', 'movements', 'order_items', 'inventory_entries',
           'audit_events', 'api_requests', 'product_creations', 'product_status_changes')
+EPHEMERAL_TABLES = ('agent_confirmations',)
 IDENTITIES = {'products': 'sort_order', 'movements': 'id', 'order_items': 'id',
               'inventory_entries': 'id', 'audit_events': 'id', 'product_status_changes': 'id'}
 

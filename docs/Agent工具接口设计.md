@@ -3,9 +3,9 @@
 > 原名：Agent 工具接口设计。文件名保持不变，避免既有链接失效。
 
 更新日期：2026-10-19
-状态：**P1 已实现**：Python Registry、HTTP Adapter、11 个只读工具和顾客 `prepare_order`/`commit_order` 已落地，并有 5 项 Agent 工具测试。P2+ 能力仍为设计，不代表已实现。
+状态：**P1/P2 已实现**：Python Registry、HTTP Adapter、19 个工具（顾客 11、商户 8）、单商品详情、价格/库存筛选排序、顾客立即购买/取消、数据库确认令牌、原子 claim/release 和确定性编排演示已落地；P3+ 能力仍为设计，不代表已实现。
 
-> 2026-10-19 更新：P1a 只读工具、P1b 顾客下单确认、内存确认令牌和实际 HTTP 调用测试已完成。商户写工具、商品详情/筛选、购物车、地图、价格历史和 AI 工具仍未实现。
+> 2026-10-26 更新：P2 商品详情、筛选排序、buy_now/取消、确认令牌持久化与编排壳已完成。商户写工具、购物车、地图、价格历史、商户取消和 AI 工具仍未实现。
 
 本文与 [权限与角色设计](权限与角色设计.md) 配套：权限矩阵决定“谁能做什么”，本文决定“Agent 通过什么工具、以什么数据范围做”。
 
@@ -26,11 +26,12 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 本设计文档 | 已完成并同步 P1 实现 |
-| Python Registry | P1 已实现（`agent_registry.py`） |
-| HTTP Adapter | P1 已实现（`server.py` 的 `/api/agent/*`） |
-| `/api/agent/tools` | P1 已实现 |
-| 确认令牌/审批端点 | P1 已实现（内存 TTL；无持久化） |
+| 本设计文档 | 已完成并同步 P1/P2 实现 |
+| Python Registry | P1/P2 已实现（`agent_registry.py`） |
+| HTTP Adapter | P1/P2 已实现（`server.py` 的 `/api/agent/*`） |
+| `/api/agent/tools` | P1/P2 已实现（读者 19 个工具） |
+| 确认令牌/审批端点 | P1/P2 已实现（数据库 TTL、原子 claim/release） |
+| 编排壳/演示 | P2 已实现（`agent_runtime.py`、`agent_demo.py`，非 AI） |
 | AI 工具 | 未实现，且按 `AGENTS.md` 未获授权前不引入 |
 
 本文中的“可用”表示**现有业务函数或 HTTP API 已具备，工具层可以直接包装**；具体是否已注册以 P1 工具目录和 `agent_tools.py` 为准。
@@ -143,13 +144,13 @@ flowchart LR
 | 领域 | 读工具 | 写工具 | 角色 |
 | --- | --- | --- | --- |
 | `catalog` | 8 | 0 | 顾客/商户 |
-| `orders` | 4 | 11 | 顾客/商户 |
+| `orders` | 5 | 11 | 顾客/商户 |
 | `merchant_catalog` | 0 | 10 | 商户 |
 | `inventory` | 1 | 4 | 商户 |
 | `analytics` | 6 | 0 | 商户/顾客（顾客价格历史未实现） |
 | `ai_system` | 5 | 7 | 规划，未实现 |
 
-合计 **56 个唯一工具名**：8 + 15 + 10 + 5 + 6 + 12。其中部分名称标记为合并/排除（见 5.3），注册表只注册独立、已实现的工具。
+合计 **57 个唯一工具名**：8 + 16 + 10 + 5 + 6 + 12；其中 `customer.buy_now` 拆为 prepare/commit 两个工具名。部分名称标记为合并/排除（见 5.3），注册表只注册独立、已实现的工具。
 
 ### 5.3 合并与排除
 
@@ -340,9 +341,9 @@ class ToolRegistry:
 3. `resolve`：未知 → 404；角色不符 → 403。
 4. 校验 `arguments` 是否符合 `input_schema`。
 5. 写工具缺少 `request_id` → 400。
-6. `requires_confirmation`：检查令牌状态、角色/`buyer_key` 绑定、TTL、参数指纹。
+6. `requires_confirmation`：检查令牌状态、角色/`buyer_key` 绑定、TTL、参数指纹，并在同一写事务中把 `approved` 原子 claim 为 `consumed`。
 7. handler 调用 `db.py`；角色、`buyer_key` 只来自 `ToolContext`。
-8. 成功时消费确认令牌，返回 envelope；失败不消费（除非已明确进入终态）。
+8. 成功返回 envelope；handler 失败时 `release` 把令牌退回 `approved`，不产生未捕获的半状态。若进程在 claim 后崩溃，令牌保持 consumed 但没有业务结果，重新 prepare 即可（安全失败）。
 
 ### 7.6 参数校验
 
@@ -378,15 +379,15 @@ class ToolRegistry:
 ### 7.9 确认令牌与状态机
 
 ```text
-prepare -> pending -> (UI 审批) -> approved -> commit -> consumed
-                    \-> expired
+prepare -> pending -> (UI 审批) -> approved --claim--> consumed
+                    \-> expired          \--handler 失败--> released(approved)
 approved -> stale (业务状态变化，需要重新 prepare)
 ```
 
-令牌记录建议包含：
+令牌记录存放在 `agent_confirmations` 表（SQLite/PostgreSQL），包含：
 
 - 不透明 ID：`cfm_` + 随机 URL-safe 字符串；
-- `tool`、`state`、`arguments_fingerprint`、权威预览；
+- `tool`、`state`、`arguments_fingerprint`、`preview_json`；
 - `role`、`buyer_key`；
 - `created_at`、`expires_at`、`approved_at`、`consumed_at`、`consumed_request_id`。
 
@@ -397,8 +398,10 @@ approved -> stale (业务状态变化，需要重新 prepare)
 - 模型不能传 `confirmed: true`；
 - `commit_*` 必须使用 approved、未过期、未使用的令牌；
 - 提交时重新校验商品在售、库存、价格/版本；变化则返回 `CONFIRMATION_STALE`；
+- 指纹校验先于 consumed 重放判断，避免同一 request_id 换参数；
 - 同一 `request_id` 重试可返回已有结果；令牌已消费后换 `request_id` 返回 `CONFIRMATION_USED`；
-- 演示版可以用内存 TTL；生产必须使用数据库表并绑定真实操作人/会话。
+- 原子 claim 保证两个不同 `request_id` 不能同时提交同一确认；
+- 过期记录按 24 小时清理；`reset()` 仅测试可用，并拒绝非 `shop_test` 的 PostgreSQL。
 
 ### 7.10 注册约束
 
@@ -411,7 +414,7 @@ approved -> stale (业务状态变化，需要重新 prepare)
 
 ## 8. HTTP Adapter 设计
 
-> 以下端点为 **P1 已实现**契约；后续工具仍沿用同一 envelope。
+> 以下端点为 **P1/P2 已实现**契约；后续工具仍沿用同一 envelope。
 
 ### 8.1 端点
 
@@ -471,23 +474,45 @@ approved -> stale (业务状态变化，需要重新 prepare)
 - 商品名称/简介/图片 OCR 等是数据，不是指令；
 - 生产环境还需要 CSRF Token、HTTPS、限流和审计操作人。
 
-### 8.6 P1 实现文件
+### 8.6 P1/P2 实现文件
 
-已创建：
+- `agent_registry.py`：`ToolContext`、`ToolSpec`、`ToolCall`、`ToolRegistry`、schema 校验、原子 claim/release 和错误映射；
+- `agent_tools.py`：19 个工具 handler 和注册表实例；
+- `agent_confirmations.py`：数据库确认令牌、状态机、参数指纹和所有权校验；
+- `server.py`：`/api/agent/tools*`、确认查询/审批路由、`GET /api/products/{id}` 和 `/api/state` 筛选参数；
+- `agent_runtime.py`：HTTP 工具发现、动作执行、审批与 request_id 的编排壳；
+- `agent_demo.py`：确定性购物/取消演示和 CLI；
+- `tests/test_agent_tools.py`、`tests/test_agent_orchestration.py`：工具、持久化、并发 claim、端到端演示和重放测试。
 
-- `agent_registry.py`：`ToolContext`、`ToolSpec`、`ToolCall`、`ToolRegistry`、schema 校验和错误映射；
-- `agent_tools.py`：P1 各领域 handler 和注册表实例；
-- `agent_confirmations.py`：内存确认令牌、状态机和参数指纹；
-- `server.py`：`/api/agent/tools*` 与确认查询/审批路由；
-- `tests/test_agent_tools.py`：工具列表、只读、隔离、prepare/approve/commit、幂等和确认失败测试。
+后续 P3+ 工具继续在 `agent_tools.py` 注册；商户写工具、购物车、真实审批 UI 和 AI 工具仍未实现。
 
-后续 P2+ 工具继续在 `agent_tools.py` 注册；确认令牌生产化需要数据库表和 UI 页面。
+### 8.7 编排壳与确定性演示（非 AI）
+
+`agent_runtime.py` 不依赖模型，只通过 HTTP 调用 Adapter：
+
+```text
+Planner.next(history) -> Action(tool, arguments, request_id?, confirmation_id?, approve?)
+Runtime -> GET /api/agent/tools -> 校验工具可见性
+        -> 写工具自动生成 <run_id>-<step> request_id
+        -> approve=True 时读取确认、调用审批策略、再执行 commit
+        -> 记录 Step，失败默认停止
+```
+
+- `Planner` 是协议；`agent_demo.BuyCancelPlanner` 是固定状态机，不代表自主智能；
+- `Approver` 由调用方提供；演示默认自动批准，`--interactive` 改为人工确认；
+- `agent_demo.py` 复用同一 `AgentClient`/会话和 run-id 时可验证幂等重放；
+- 不调用 LLM、不联网 AI、不自动批准生产写操作。
+
+```bash
+python agent_demo.py --base http://127.0.0.1:8000 --query 苹果 \
+  --run-id demo-001 --session-file .tmp/agent-demo-session.json
+```
 
 ## 9. 工具目录（按领域）
 
 > “状态/批次”中，`A`/`B` 是现有能力适配状态；`P1a`/`P1b`/`P2`/`P3`/`P4` 是计划批次。`C`/`D` 不注册。
 >
-> P1 已按本目录实现 13 个工具（11 个只读 + 2 个顾客下单确认）；其余 `C`/`D` 仍未注册。
+> 已按本目录实现 19 个工具（顾客 11、商户 8）；其余 `C`/`D` 仍未注册。
 >
 > 所有写工具的 `request_id` 都原样传给 `db.py`；`confirmation_id` 只用于需要确认的 `commit_*`。
 
@@ -496,17 +521,17 @@ approved -> stale (业务状态变化，需要重新 prepare)
 | 工具 | 功能与输入 | 简要实现 | 角色/数据范围 | 幂等/确认 | 状态/批次 |
 | --- | --- | --- | --- | --- | --- |
 | `customer.list_categories` | 分类列表；无参数 | `db.CATEGORIES`，现有 `GET /api/categories`；共享 handler，独立 spec | 顾客；只读分类 | 无 | A/P1a |
-| `customer.search_products` | 搜索/分类/页码；`query`、`category`、`page` | `db.snapshot(page, status="active", search, category)`；裁剪为顾客字段 | 顾客；仅在售 | 无 | A/P1a（基础）；价格/库存筛选 B/P2 |
-| `customer.get_product` | 单商品详情；`product_id` | 无单商品函数/端点；需新增 `db.get_product` + `GET /api/products/{id}` | 顾客；仅在售 | 无 | C/P2 |
+| `customer.search_products` | 搜索/分类/价格/库存/排序/页码 | `db.snapshot(..., min_price_cents, max_price_cents, in_stock, sort)`；裁剪为顾客字段 | 顾客；仅在售 | 无 | A/P2（含 P1a 基础） |
+| `customer.get_product` | 单商品详情；`product_id` | `db.get_product(..., active_only=True)` + `GET /api/products/{id}` | 顾客；仅在售 | 无 | A/P2 |
 | `customer.get_product_image` | 商品图片 | 现有 `db.product_image` / 图片端点；工具返回 `image_url`，不返回二进制 | 顾客 | 无 | M（合入商品读取） |
 | `customer.get_stock` | 库存/可售状态 | 已是 `snapshot` 商品字段 | 顾客 | 无 | M（合入商品读取） |
-| `merchant.list_products` | 商品列表；`status`、`query`、`category`、`page` | `db.snapshot`；商户可看全部状态 | 商户；全部商品 | 无 | A/P1a |
-| `merchant.get_product` | 单商品详情；`product_id` | 需新增 `db.get_product` + `GET /api/products/{id}` | 商户；全部商品 | 无 | C/P2 |
+| `merchant.list_products` | 商品列表；`status`、查询、价格/库存/排序、页码 | `db.snapshot`；商户可看全部状态 | 商户；全部商品 | 无 | A/P2（含 P1a 基础） |
+| `merchant.get_product` | 单商品详情；`product_id` | `db.get_product` + `GET /api/products/{id}` | 商户；全部商品 | 无 | A/P2 |
 | `merchant.list_categories` | 分类列表；无参数 | `db.CATEGORIES` / `GET /api/categories` | 商户 | 无 | A/P1a |
 
-**不要宣称**：`min_price_cents`、`max_price_cents`、`in_stock`、`sort`、可调 `page_size` 已存在；当前 `snapshot` 固定 6 个/页，只有 status/search/category。
+**边界**：`min_price_cents`、`max_price_cents`、`in_stock`、`sort` 已实现；`page_size` 仍固定 6 个/页，不开放可调参数。筛选后的 `product_count/pages` 按筛选统计，全店汇总字段保持原口径。
 
-### 9.2 orders（15 个工具）
+### 9.2 orders（16 个工具）
 
 | 工具 | 功能与输入 | 简要实现 | 角色/数据范围 | 幂等/确认 | 状态/批次 |
 | --- | --- | --- | --- | --- | --- |
@@ -516,9 +541,10 @@ approved -> stale (业务状态变化，需要重新 prepare)
 | `merchant.get_order` | 全部订单详情；`order_id` | `db.get_order(id, buyer_key=None)` | 商户；全部 | 无 | A/P1a |
 | `customer.prepare_order` | 下单预览；`items` | 读取商品、校验在售/库存、计算服务端总额；生成确认令牌 | 顾客；自己的会话 | 无副作用；返回 `confirmation_id` | B/P1b |
 | `customer.commit_order` | 提交顾客订单；`items` | `db.create_order(payload,buyer_key=ctx.buyer_key)`；复验预览价格/库存 | 顾客；自己的会话 | `request_id` + 确认令牌 | B/P1b |
-| `customer.buy_now` | 单商品立即购买；`product_id`、`quantity` | `db.move_stock("purchase",...)`，底层创建订单 | 顾客 | `request_id` + 确认 | B/P2 |
-| `customer.prepare_order_cancel` | 取消预览；`order_id`、`reason` | `db.get_order` 校验归属；生成确认令牌 | 顾客；自己的订单 | 无副作用 | B/P2 |
-| `customer.commit_order_cancel` | 取消自己的订单 | `db.cancel_order(..., buyer_key=ctx.buyer_key)` | 顾客；自己的订单 | `request_id` + 确认 | B/P2 |
+| `customer.prepare_buy_now` | 立即购买预览；`product_id`、`quantity` | `db._order_items` + `_preview_order`；令牌绑定 `customer.commit_buy_now` | 顾客；自己的会话 | 无副作用；返回 `confirmation_id` | A/P2 |
+| `customer.commit_buy_now` | 提交立即购买 | `db.create_order(..., expected_prices=...)` | 顾客；自己的会话 | `request_id` + 确认 | A/P2 |
+| `customer.prepare_order_cancel` | 取消预览；`order_id`、`reason` | `db.get_order` 校验归属；生成确认令牌 | 顾客；自己的订单 | 无副作用 | A/P2 |
+| `customer.commit_order_cancel` | 取消自己的订单 | `db.cancel_order(..., buyer_key=ctx.buyer_key)` | 顾客；自己的订单 | `request_id` + 确认 | A/P2 |
 | `customer.get_cart` | 读取购物车 | 无服务端购物车；P1-11 | 顾客 | 无 | C/P3 |
 | `customer.add_to_cart` | 加入购物车；`product_id`、`quantity` | 无购物车/表/API | 顾客 | 无 | C/P3 |
 | `customer.update_cart` | 修改数量 | 无购物车/表/API | 顾客 | 无 | C/P3 |
@@ -526,7 +552,7 @@ approved -> stale (业务状态变化，需要重新 prepare)
 | `merchant.prepare_order_cancel` | 商户取消预览；`order_id`、`reason` | `db.get_order`；生成确认令牌 | 商户；全部订单 | 无副作用 | B/P3 |
 | `merchant.commit_order_cancel` | 商户取消任意订单 | `db.cancel_order(..., buyer_key=None)` | 商户；全部订单 | `request_id` + 确认 | B/P3 |
 
-**P1b 关键要求**：`prepare_order` 不预留库存；`commit_order` 必须重新校验商品在售、库存、价格/总额，变化时返回 `CONFIRMATION_STALE`。如果无法实现预期价格校验，则只交付 P1a，P1b 继续标记规划。
+**确认要求**：`prepare_*` 不预留库存；`commit_*` 必须重新校验商品在售、库存、价格/总额，变化时返回 `CONFIRMATION_STALE`。P1b/P2 已实现预期价格复验、数据库令牌和原子 claim；已取消订单再次取消返回 `changed=false`，不会重复返还库存。
 
 ### 9.3 merchant_catalog（10 个写工具）
 
@@ -587,71 +613,73 @@ approved -> stale (业务状态变化，需要重新 prepare)
 
 ## 10. 第一批交付范围
 
-### 10.1 P1a：只读工具（11 个，已实现）
+### 10.1 P1a/P2：只读工具（13 个，已实现）
 
-顾客 4 个：
+顾客 5 个：
 
 - `customer.list_categories`
-- `customer.search_products`（仅现有 query/category/page，不含价格/库存筛选）
+- `customer.search_products`（query/category/价格/库存/排序/页码）
+- `customer.get_product`
 - `customer.get_my_orders`
 - `customer.get_my_order`
 
-商户 7 个：
+商户 8 个：
 
 - `merchant.list_categories`
-- `merchant.list_products`
+- `merchant.list_products`（含价格/库存/排序筛选）
+- `merchant.get_product`
 - `merchant.list_orders`
 - `merchant.get_order`
 - `merchant.get_inventory_history`
 - `merchant.get_audit_events`
 - `merchant.get_sales_summary`
 
-P1a 不新增业务端点；需要做角色过滤、顾客字段裁剪、禁止 `buyer_key`/销售额/审计泄露，并验证读工具不改变数据库。
+读工具需要角色过滤、顾客字段裁剪，禁止 `buyer_key`/销售额/审计泄露，并验证不改变数据库。
 
-### 10.2 P1b：顾客结算确认（2 个，已实现）
+### 10.2 P1b/P2：顾客确认写操作（6 个，已实现）
 
-- `customer.prepare_order`
-- `customer.commit_order`
+- `customer.prepare_order` / `customer.commit_order`
+- `customer.prepare_buy_now` / `customer.commit_buy_now`
+- `customer.prepare_order_cancel` / `customer.commit_order_cancel`
 
-前置条件：
+要求：
 
-- 确认令牌存储 + UI 审批端点；
-- 服务端生成商品、数量、单价、总额和库存快照；
-- `commit_order` 重新校验在售/库存/价格/总额；
-- 不做库存预留；变化时返回 `CONFIRMATION_STALE`；
-- 如果预期价格校验不能落地，只交付 P1a，P1b 保持规划。
+- 确认令牌存数据库 + 审批端点；服务端生成商品、数量、单价、总额和库存快照；
+- `commit_*` 重新校验在售/库存/价格/总额，变化时返回 `CONFIRMATION_STALE`；
+- 不做库存预留；同一确认只能成功 claim 一次；
+- 同一 `request_id` 重放走业务幂等；取消已取消订单返回 `changed=false`。
 
-### 10.3 P1 明确不做
+### 10.3 P1/P2 明确不做
 
-- `customer.get_product` / `merchant.get_product`（无单商品端点）；
-- 价格/库存筛选、排序、可调页容量（P2-05）；
-- `customer.buy_now`、顾客/商户取消订单工具（P2/P3）；
-- 全部商户写工具（P3）；
+- 商户写工具（商品创建/编辑/上下架/补货/调整，P3）；
 - 购物车、分类/货架（P1-11）；
+- 商户取消订单工具（P3，顾客取消已实现）；
 - `merchant.export_records`（后台管理，不注册）；
 - 所有 `ai_system` 工具；
-- 真实认证、CSRF、限流、多门店（生产前置）。
+- 真实认证、CSRF、限流、多门店（生产前置）；
+- 可调 `page_size`（仍固定 6 个/页）。
 
-### 10.4 P1 验收
+### 10.4 验收
 
 - 401/403/404/400/409/503 映射正确；
-- 角色过滤后的工具列表正确；
+- 角色过滤后的工具列表正确（顾客 11、商户 8）；
 - 顾客 A 不能读取/取消顾客 B 的订单；
 - 结果不含 `buyer_key`，读工具不产生业务写入；
 - prepare/commit 正常路径；过期/已用/不匹配/业务变化令牌均被拒绝；
 - 同一 `request_id` 重复提交只产生一笔订单；
+- 同一确认并发提交只成功一次；跨 store 实例仍能读取未过期令牌；
 - 现有回归继续通过。
 
-当前实现结果：37 项 SQLite + 15 项 PostgreSQL 测试全部通过；实际 HTTP 调用完成 prepare → approve → commit → 取消，库存恢复。确认令牌为内存 TTL，生产持久化仍未实现。
+当前实现结果：48 项 SQLite + 18 项 PostgreSQL 测试全部通过；实际 HTTP 调用完成 prepare → approve → commit → 取消，库存恢复；确认令牌已持久化，原子 claim 和 release 已验证。
 
 ## 11. 未实现能力与前置条件
 
 | 缺口 | 影响工具 | 前置条件 | 目标 |
 | --- | --- | --- | --- |
-| 无 `GET /api/products/{id}` | `customer.get_product`、`merchant.get_product` | 单商品读取函数 + 端点 | P2 |
-| 无价格/库存筛选、页容量 | `customer.search_products` | `snapshot` 扩展或新 catalog 查询（P2-05） | P2 |
-| 无持久化确认/正式审批 UI | 所有 `prepare_*`/`commit_*` | 已实现内存令牌 + 审批端点；生产需数据库表和 UI | P1b 已实现演示版 |
-| 无预期价格/库存复验 | `customer.commit_order` | 已实现订单创建时的预期价格和库存复验 | P1b 已完成 |
+| 单商品端点 | `customer.get_product`、`merchant.get_product` | 已实现 `db.get_product` + `GET /api/products/{id}` | 已完成 |
+| 价格/库存筛选、排序 | `customer.search_products`、`merchant.list_products` | 已实现 `snapshot` 扩展；`page_size` 仍固定 6 | 已完成 |
+| 正式审批 UI/真实操作人 | 所有 `prepare_*`/`commit_*` | 已实现数据库令牌 + 审批端点；仍需 UI 页面和真实账号绑定 | P2-03/P3 |
+| 预期价格/库存复验 | `customer.commit_*` | 已实现订单创建时的预期价格和库存复验 | 已完成 |
 | 无服务端购物车 | 购物车工具 | P1-11 数据/接口 | P3 |
 | 固定分类、`zone` 文本 | 分类/货架工具、地图 | P1-11 分类/货架表 | P4 |
 | 无价格历史/行情 | 价格/行情/定价工具 | P2-04 | P4/P5 |
@@ -693,9 +721,10 @@ P1a 不新增业务端点；需要做角色过滤、顾客字段裁剪、禁止 
 
 ### 12.4 当前安全限制
 
-- 角色选择是演示入口，不是真实认证；
-- 会话/确认令牌在内存中，服务重启失效；
-- 没有 CSRF Token、HTTPS、限流、真实审计操作人；
+- 角色选择是演示入口，不是真实认证；会话仍在内存中；
+- 确认令牌已落库并带 TTL/所有权校验，但审批人仍是演示会话，没有正式审批 UI 或真实操作人绑定；
+- 没有 CSRF Token、HTTPS、限流、完整工具调用审计；
+- 编排演示的自动审批只用于本机演示，不能视为生产授权；
 - 生产前必须完成 P2-03 真实账号/会话与安全硬化；
 - 不把“本机 HTTP 演示”描述为生产权限系统。
 
@@ -713,13 +742,13 @@ $env:SHOP_TEST_POSTGRES = '1'
 git diff --check
 ```
 
-当前结果：SQLite 37 项（含 5 项 Agent 工具测试）+ PostgreSQL 15 项，共 52 项通过。实际 HTTP 调用已验证工具列表、商品搜索、prepare、confirmation 查询、approve、commit、取消订单和库存恢复。
+当前结果：SQLite 48 项 + PostgreSQL 18 项，共 66 项通过。实际 HTTP 调用已验证工具列表、商品搜索/筛选、单商品详情、prepare、confirmation 查询、approve、commit、取消订单、库存恢复、确认令牌跨实例读取和编排演示重放。
 
 人工检查：
 
-- 工具名唯一数 = 56；领域计数 = 8/15/10/5/6/12；
+- 已注册工具 19 个（顾客 11、商户 8）；规划工具名 57 个，领域计数 = 8/16/10/5/6/12；
 - 与 [权限与角色设计](权限与角色设计.md) 的角色/数据范围逐项一致；
-- P1 只注册 `A`/已实现 `B`，不含 `C`/`D`；
+- 注册表只包含 `A`/已实现 `B`，不含 `C`/`D`；
 - 规划工具仍标为“未实现/需新增”，不能写成“支持/可用”；
 - 检查 Markdown 链接、表格、Mermaid；
 - 本次改动未提交、未推送。
@@ -731,20 +760,22 @@ git diff --check
 | Registry 单元 | 重名、非法角色、`requires_confirmation`/`side_effect` 约束、保留参数、bool 被当整数、未知字段 |
 | HTTP 集成 | 401/403/404/400/409/413/415/503；envelope；无 `Set-Cookie`；无 `buyer_key` |
 | 契约 | `GET /api/agent/tools` 按角色过滤；所有 schema 拒绝未知字段和 `role`/`buyer_key` |
-| 确认 | prepare→approve→commit；pending/expired/used/mismatch/stale；重复 `request_id` 只产生一笔 |
+| 确认 | prepare→approve→commit；pending/expired/used/mismatch/stale；重复 `request_id` 只产生一笔；并发 claim 只成功一次；跨 store 实例可读 |
+| 筛选 | 价格区间、库存、排序、6 个/页；非法参数 400 |
 | 隔离 | 顾客 A 不能读/取消 B 的订单；商户可读全部；顾客无销售额/台账/审计/导出 |
 | 只读 | 读工具不改变数据库状态 |
-| 回归 | 现有 32 项 SQLite + 15 项 PostgreSQL 测试保持通过 |
-| AI | P1 不注册、不调用任何模型/视觉/语音/外部行情 |
+| 编排 | 工具发现、审批、自动 request_id、失败停止、同会话重放不重复扣库存 |
+| 回归 | 现有 48 项 SQLite + 18 项 PostgreSQL 测试保持通过 |
+| AI | P1/P2 不注册、不调用任何模型/视觉/语音/外部行情 |
 
 ## 14. 实施路线图
 
 | 阶段 | 内容 | 依赖 | 退出标准 |
 | --- | --- | --- | --- |
-| P1a | Python Registry + HTTP Adapter + 11 个只读工具 | 权限会话、现有 `db.py` | 角色过滤/数据裁剪/只读测试通过 |
-| P1b | 顾客 `prepare_order`/`commit_order` + 确认令牌/UI | 确认服务、价格/库存复验 | 预览-审批-提交/过期/重复测试通过 |
-| P2 | 单商品详情、价格/库存筛选、顾客 `buy_now`/取消、商户取消 | P2-05、单商品端点 | 查询/筛选/取消测试通过 |
-| P3 | 商户商品写工具、补货/调整、购物车、商户订单取消 | P1-11、确认服务 | 所有写操作可确认、可幂等、可审计 |
+| P1a | Python Registry + HTTP Adapter + 11 个只读工具（已完成） | 权限会话、现有 `db.py` | 角色过滤/数据裁剪/只读测试通过 |
+| P1b | 顾客 `prepare_order`/`commit_order` + 确认令牌（已完成） | 确认服务、价格/库存复验 | 预览-审批-提交/过期/重复测试通过 |
+| P2 | 单商品详情、价格/库存筛选、顾客 `buy_now`/取消、编排壳（已完成） | P2-05、单商品端点 | 查询/筛选/取消/持久化/重放测试通过 |
+| P3 | 商户商品写工具、补货/调整、购物车、商户订单取消、正式审批 UI | P1-11、确认服务 | 所有写操作可确认、可幂等、可审计 |
 | P4 | 分类/货架、价格历史/行情、地图、偏好 | P1-11、P2-04、P3-03、P3-04 | 结构化数据/规则基线可用 |
 | P5+ | 图片识别、定价建议、语音修正、顾客对话/图片/路线 | 明确 AI 授权、模型适配层、评测集 | 低置信度人工纠正、硬约束评测通过 |
 
@@ -763,30 +794,31 @@ git diff --check
 
 ### 15.2 关键决策与待确认问题
 
-**P1 已决定并实现：**
+**P1/P2 已决定并实现：**
 
 - 扩展现有 `docs/Agent工具接口设计.md`，不新建第二份工具目录；
 - Python Registry 为核心，HTTP Adapter 为薄层；
 - handler 直接调用 `db.py`，不反向调用 `/api/*` 带 Cookie；
 - 角色/`buyer_key` 只从服务端会话注入；
 - 写工具透传 `request_id`，高风险写操作使用 prepare/commit + 确认令牌；
-- P1a 11 个只读工具 + P1b 顾客下单已实现；
+- P1a 11 个只读工具 + P1b 顾客下单 + P2 详情/筛选/buy_now/取消已实现；
 - HTTP Adapter 与网页共用 8000 端口和 Cookie 会话；
-- 确认令牌 P1 使用内存 TTL，预期价格/库存复验已实现；
+- 确认令牌使用数据库 TTL 和原子 claim；预期价格/库存复验已实现；
+- 编排壳只做 HTTP 编排，不引入 LLM；
 - `merchant.export_records` 仍不作为模型工具；
 - AI 工具只作为规划条目，不注册。
 
 **后续待确认：**
 
-1. 确认令牌生产化：数据库表、UI 审批页面和真实操作人绑定；
-2. 商品详情、价格/库存筛选、购物车和商户写工具的优先级；
+1. 正式审批 UI、真实操作人绑定和完整工具调用审计；
+2. 购物车、商户写工具和商户取消订单的优先级；
 3. HTTP Adapter 是否拆为独立服务；
 4. AI 工具授权的具体范围、模型供应商、数据合规和评测集；
 5. 真实账号/会话（P2-03 剩余）与 Agent 写操作的上线顺序。
 
 ### 15.3 当前结论
 
-- P1 已实现 Python Registry、HTTP Adapter、11 个只读工具和顾客 `prepare_order`/`commit_order` 确认流程；
-- 确认令牌为内存 TTL；提交时复验商品在售、库存和价格，变化返回 `CONFIRMATION_STALE`；
-- 单商品详情、价格/库存筛选、购物车、分类/货架、价格历史、地图、商户写工具和 AI 均未实现，不能宣称可用；
+- P1/P2 已实现 Python Registry、HTTP Adapter、19 个工具、顾客下单/购买/取消确认流程和确定性编排演示；
+- 确认令牌已落库，带 TTL、所有权校验和原子 claim；提交时复验商品在售、库存和价格，变化返回 `CONFIRMATION_STALE`；
+- 购物车、分类/货架、价格历史、地图、商户写工具、正式审批 UI 和 AI 均未实现，不能宣称可用；
 - 所有改动保留在本机，不提交、不推送。

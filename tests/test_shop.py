@@ -91,6 +91,36 @@ class DatabaseTests(unittest.TestCase):
         self.assertTrue(all(state["product_count"] == 13 and state["stock_total"] == 48 for state in pages))
         self.assertEqual(snapshot(self.db_path, page=999)["page"], 3)
 
+    def test_snapshot_price_stock_filters_and_sort(self):
+        for index, (price, stock) in enumerate([(100, 5), (200, 0), (300, 1),
+                                                (350, 1), (550, 7), (900, 2)]):
+            create_product(self.product_payload(f"filter-{index}", price_cents=price, stock=stock),
+                           self.db_path)
+
+        filtered = snapshot(self.db_path, min_price_cents=500, max_price_cents=600, sort="price_desc")
+        self.assertEqual(filtered["product_count"], 2)
+        self.assertEqual([product["price_cents"] for product in filtered["products"]], [590, 550])
+        self.assertEqual(filtered["active_count"], 8)
+        self.assertEqual(filtered["filters"], {"min_price_cents": 500, "max_price_cents": 600,
+                                               "in_stock": None, "sort": "price_desc"})
+
+        out_of_stock = snapshot(self.db_path, in_stock=False)
+        self.assertEqual(out_of_stock["product_count"], 1)
+        self.assertEqual(out_of_stock["products"][0]["stock"], 0)
+
+        first_page = snapshot(self.db_path, in_stock=True, sort="price_asc")
+        self.assertEqual(first_page["page_size"], 6)
+        self.assertEqual(first_page["pages"], 2)
+        self.assertEqual(len(first_page["products"]), 6)
+        prices = [product["price_cents"] for product in first_page["products"]]
+        self.assertEqual(prices, sorted(prices))
+        self.assertEqual(len(snapshot(self.db_path, page=2, in_stock=True, sort="price_asc")["products"]), 1)
+
+        for arguments in ({"min_price_cents": 600, "max_price_cents": 500}, {"sort": "bogus"},
+                          {"min_price_cents": True}, {"in_stock": "yes"}):
+            with self.assertRaises(InventoryError):
+                snapshot(self.db_path, **arguments)
+
     def test_concurrent_listing_is_idempotent(self):
         with ThreadPoolExecutor(max_workers=10) as pool:
             results = list(pool.map(lambda _: create_product(self.product_payload(), self.db_path), range(10)))
